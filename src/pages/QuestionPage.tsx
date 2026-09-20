@@ -23,6 +23,10 @@ import type { PGlite } from "@electric-sql/pglite";
 
 import { questions } from "../data/questions";
 import { createQuestionDatabase } from "../lib/pglite";
+import {
+  isQuestionSolved,
+  markQuestionSolved,
+} from "../lib/progress";
 import { validateResult } from "../lib/validation";
 
 type ExecutionStatus =
@@ -66,6 +70,12 @@ function QuestionPage() {
   const [isCorrect, setIsCorrect] =
     useState<boolean | null>(null);
 
+  const [isSolved, setIsSolved] = useState(
+    question
+      ? isQuestionSolved(question.id)
+      : false,
+  );
+
   const databaseRef =
     useRef<PGlite | null>(null);
 
@@ -81,6 +91,12 @@ function QuestionPage() {
     setExecutionTime(null);
     setValidationMessage("");
     setIsCorrect(null);
+
+    setIsSolved(
+      question
+        ? isQuestionSolved(question.id)
+        : false,
+    );
   }, [question?.id, question?.starterCode]);
 
   useEffect(() => {
@@ -204,6 +220,14 @@ function QuestionPage() {
         setValidationMessage(
           validation.message,
         );
+
+        if (validation.correct) {
+          markQuestionSolved(
+            currentQuestion.id,
+          );
+
+          setIsSolved(true);
+        }
       }
     } catch (err) {
       const elapsed =
@@ -277,6 +301,17 @@ function QuestionPage() {
           <span className="text-sm font-medium text-gray-900">
             Practice
           </span>
+
+          {isSolved && (
+            <>
+              <div className="mx-4 h-5 w-px bg-gray-200" />
+
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-600">
+                <CheckCircle2 size={13} />
+                Solved
+              </span>
+            </>
+          )}
         </div>
       </header>
 
@@ -305,9 +340,18 @@ function QuestionPage() {
               </span>
             </div>
 
-            <h1 className="mt-4 text-2xl font-semibold text-gray-900">
-              {question.title}
-            </h1>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-semibold text-gray-900">
+                {question.title}
+              </h1>
+
+              {isSolved && (
+                <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-600">
+                  <CheckCircle2 size={13} />
+                  Solved
+                </span>
+              )}
+            </div>
 
             <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-500">
               {question.description}

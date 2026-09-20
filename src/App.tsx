@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import {
   BarChart3,
   BookOpen,
+  CheckCircle2,
   ChevronDown,
   Code2,
   Filter,
@@ -17,6 +18,10 @@ import {
 } from "lucide-react";
 
 import { questions } from "./data/questions";
+import {
+  getSolvedQuestionIds,
+  PROGRESS_EVENT,
+} from "./lib/progress";
 
 const navigation = [
   { label: "Home", icon: Home },
@@ -34,22 +39,69 @@ const practiceItems = [
 
 function App() {
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedDifficulty, setSelectedDifficulty] = useState("All");
-  const [selectedQuestionType, setSelectedQuestionType] = useState("All");
-  const [selectedLanguage, setSelectedLanguage] = useState("All");
-  const [selectedCompany, setSelectedCompany] = useState("All");
+  const [selectedDifficulty, setSelectedDifficulty] =
+    useState("All");
+  const [selectedQuestionType, setSelectedQuestionType] =
+    useState("All");
+  const [selectedLanguage, setSelectedLanguage] =
+    useState("All");
+  const [selectedCompany, setSelectedCompany] =
+    useState("All");
+
+  const [solvedQuestionIds, setSolvedQuestionIds] =
+    useState<Set<string>>(
+      () => getSolvedQuestionIds(),
+    );
+
+  useEffect(() => {
+    const syncProgress = () => {
+      setSolvedQuestionIds(
+        getSolvedQuestionIds(),
+      );
+    };
+
+    window.addEventListener(
+      PROGRESS_EVENT,
+      syncProgress,
+    );
+
+    window.addEventListener(
+      "storage",
+      syncProgress,
+    );
+
+    return () => {
+      window.removeEventListener(
+        PROGRESS_EVENT,
+        syncProgress,
+      );
+
+      window.removeEventListener(
+        "storage",
+        syncProgress,
+      );
+    };
+  }, []);
 
   const difficulties = [
     "All",
     ...Array.from(
-      new Set(questions.map((question) => question.difficulty)),
+      new Set(
+        questions.map(
+          (question) => question.difficulty,
+        ),
+      ),
     ),
   ];
 
   const questionTypes = [
     "All",
     ...Array.from(
-      new Set(questions.map((question) => question.questionType)),
+      new Set(
+        questions.map(
+          (question) => question.questionType,
+        ),
+      ),
     ),
   ];
 
@@ -57,7 +109,9 @@ function App() {
     "All",
     ...Array.from(
       new Set(
-        questions.flatMap((question) => question.languages),
+        questions.flatMap(
+          (question) => question.languages,
+        ),
       ),
     ),
   ];
@@ -66,18 +120,23 @@ function App() {
     "All",
     ...Array.from(
       new Set(
-        questions.flatMap((question) => question.companies),
+        questions.flatMap(
+          (question) => question.companies,
+        ),
       ),
     ),
   ];
 
   const filteredQuestions = useMemo(() => {
-    const normalizedSearch = searchTerm.trim().toLowerCase();
+    const normalizedSearch =
+      searchTerm.trim().toLowerCase();
 
     return questions.filter((question) => {
       const matchesSearch =
         normalizedSearch === "" ||
-        question.title.toLowerCase().includes(normalizedSearch) ||
+        question.title
+          .toLowerCase()
+          .includes(normalizedSearch) ||
         question.description
           .toLowerCase()
           .includes(normalizedSearch) ||
@@ -85,24 +144,32 @@ function App() {
           .toLowerCase()
           .includes(normalizedSearch) ||
         question.tags.some((tag) =>
-          tag.toLowerCase().includes(normalizedSearch),
+          tag
+            .toLowerCase()
+            .includes(normalizedSearch),
         );
 
       const matchesDifficulty =
         selectedDifficulty === "All" ||
-        question.difficulty === selectedDifficulty;
+        question.difficulty ===
+          selectedDifficulty;
 
       const matchesQuestionType =
         selectedQuestionType === "All" ||
-        question.questionType === selectedQuestionType;
+        question.questionType ===
+          selectedQuestionType;
 
       const matchesLanguage =
         selectedLanguage === "All" ||
-        question.languages.includes(selectedLanguage);
+        question.languages.includes(
+          selectedLanguage,
+        );
 
       const matchesCompany =
         selectedCompany === "All" ||
-        question.companies.includes(selectedCompany);
+        question.companies.includes(
+          selectedCompany,
+        );
 
       return (
         matchesSearch &&
@@ -123,25 +190,33 @@ function App() {
   const totalQuestions = questions.length;
 
   const solvedQuestions = questions.filter(
-    (question) => question.solved,
+    (question) =>
+      solvedQuestionIds.has(question.id),
   ).length;
 
   const easyQuestions = questions.filter(
-    (question) => question.difficulty === "Easy",
+    (question) =>
+      question.difficulty === "Easy",
   ).length;
 
   const mediumQuestions = questions.filter(
-    (question) => question.difficulty === "Medium",
+    (question) =>
+      question.difficulty === "Medium",
   ).length;
 
   const hardQuestions = questions.filter(
-    (question) => question.difficulty === "Hard",
+    (question) =>
+      question.difficulty === "Hard",
   ).length;
 
   const completionPercentage =
     totalQuestions === 0
       ? 0
-      : Math.round((solvedQuestions / totalQuestions) * 100);
+      : Math.round(
+          (solvedQuestions /
+            totalQuestions) *
+            100,
+        );
 
   const hasActiveFilters =
     searchTerm.trim() !== "" ||
@@ -190,7 +265,10 @@ function App() {
                   key={item.label}
                   className="mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[14px] text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
                 >
-                  <Icon size={17} strokeWidth={1.8} />
+                  <Icon
+                    size={17}
+                    strokeWidth={1.8}
+                  />
                   <span>{item.label}</span>
                 </button>
               );
@@ -200,7 +278,10 @@ function App() {
             <div className="mt-3">
               <button className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-[14px] font-medium text-gray-800">
                 <span className="flex items-center gap-3">
-                  <Code2 size={17} strokeWidth={1.8} />
+                  <Code2
+                    size={17}
+                    strokeWidth={1.8}
+                  />
                   Practice
                 </span>
 
@@ -220,7 +301,10 @@ function App() {
                           : "text-gray-500 hover:bg-gray-50 hover:text-gray-800"
                       }`}
                     >
-                      <Icon size={15} strokeWidth={1.8} />
+                      <Icon
+                        size={15}
+                        strokeWidth={1.8}
+                      />
                       <span>{item.label}</span>
                     </button>
                   );
@@ -232,7 +316,10 @@ function App() {
           {/* Bottom navigation */}
           <div className="mt-auto border-t border-gray-100 p-3">
             <button className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] text-gray-600 hover:bg-gray-100">
-              <Settings size={17} strokeWidth={1.8} />
+              <Settings
+                size={17}
+                strokeWidth={1.8}
+              />
               Settings
             </button>
           </div>
@@ -277,7 +364,9 @@ function App() {
                   type="text"
                   value={searchTerm}
                   onChange={(event) =>
-                    setSearchTerm(event.target.value)
+                    setSearchTerm(
+                      event.target.value,
+                    )
                   }
                   placeholder="Search questions..."
                   className="h-full flex-1 bg-transparent px-3 text-sm text-gray-700 outline-none placeholder:text-gray-400"
@@ -285,7 +374,9 @@ function App() {
 
                 {searchTerm && (
                   <button
-                    onClick={() => setSearchTerm("")}
+                    onClick={() =>
+                      setSearchTerm("")
+                    }
                     className="mr-2 rounded-md p-1.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700"
                     aria-label="Clear search"
                   >
@@ -306,16 +397,25 @@ function App() {
               <select
                 value={selectedQuestionType}
                 onChange={(event) =>
-                  setSelectedQuestionType(event.target.value)
+                  setSelectedQuestionType(
+                    event.target.value,
+                  )
                 }
                 className="min-w-[155px] cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-600 outline-none hover:bg-gray-50"
               >
-                <option value="All">All Question Types</option>
+                <option value="All">
+                  All Question Types
+                </option>
 
                 {questionTypes
-                  .filter((type) => type !== "All")
+                  .filter(
+                    (type) => type !== "All",
+                  )
                   .map((type) => (
-                    <option key={type} value={type}>
+                    <option
+                      key={type}
+                      value={type}
+                    >
                       {type}
                     </option>
                   ))}
@@ -325,16 +425,26 @@ function App() {
               <select
                 value={selectedDifficulty}
                 onChange={(event) =>
-                  setSelectedDifficulty(event.target.value)
+                  setSelectedDifficulty(
+                    event.target.value,
+                  )
                 }
                 className="min-w-[145px] cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-600 outline-none hover:bg-gray-50"
               >
-                <option value="All">All Difficulties</option>
+                <option value="All">
+                  All Difficulties
+                </option>
 
                 {difficulties
-                  .filter((difficulty) => difficulty !== "All")
+                  .filter(
+                    (difficulty) =>
+                      difficulty !== "All",
+                  )
                   .map((difficulty) => (
-                    <option key={difficulty} value={difficulty}>
+                    <option
+                      key={difficulty}
+                      value={difficulty}
+                    >
                       {difficulty}
                     </option>
                   ))}
@@ -344,16 +454,26 @@ function App() {
               <select
                 value={selectedLanguage}
                 onChange={(event) =>
-                  setSelectedLanguage(event.target.value)
+                  setSelectedLanguage(
+                    event.target.value,
+                  )
                 }
                 className="min-w-[145px] cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-600 outline-none hover:bg-gray-50"
               >
-                <option value="All">All Languages</option>
+                <option value="All">
+                  All Languages
+                </option>
 
                 {languages
-                  .filter((language) => language !== "All")
+                  .filter(
+                    (language) =>
+                      language !== "All",
+                  )
                   .map((language) => (
-                    <option key={language} value={language}>
+                    <option
+                      key={language}
+                      value={language}
+                    >
                       {language}
                     </option>
                   ))}
@@ -363,16 +483,26 @@ function App() {
               <select
                 value={selectedCompany}
                 onChange={(event) =>
-                  setSelectedCompany(event.target.value)
+                  setSelectedCompany(
+                    event.target.value,
+                  )
                 }
                 className="min-w-[145px] cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-600 outline-none hover:bg-gray-50"
               >
-                <option value="All">All Companies</option>
+                <option value="All">
+                  All Companies
+                </option>
 
                 {companies
-                  .filter((company) => company !== "All")
+                  .filter(
+                    (company) =>
+                      company !== "All",
+                  )
                   .map((company) => (
-                    <option key={company} value={company}>
+                    <option
+                      key={company}
+                      value={company}
+                    >
                       {company}
                     </option>
                   ))}
@@ -403,8 +533,9 @@ function App() {
                     </h2>
 
                     <p className="mt-1 text-xs text-gray-500">
-                      Showing {filteredQuestions.length} of{" "}
-                      {totalQuestions} questions
+                      Showing{" "}
+                      {filteredQuestions.length}{" "}
+                      of {totalQuestions} questions
                     </p>
                   </div>
 
@@ -417,85 +548,117 @@ function App() {
               {/* Questions */}
               <div className="space-y-4 p-5">
                 {filteredQuestions.length > 0 ? (
-                  filteredQuestions.map((question) => (
-                    <Link
-                      key={question.id}
-                      to={`/question/${question.id}`}
-                      className="block rounded-lg border border-gray-100 p-5 transition hover:border-gray-200 hover:bg-gray-50 hover:shadow-sm"
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="min-w-0">
-                          {/* Difficulty + type + category */}
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span
-                              className={`rounded-md px-2 py-1 text-xs font-medium ${
-                                question.difficulty === "Easy"
-                                  ? "bg-emerald-50 text-emerald-600"
-                                  : question.difficulty === "Medium"
-                                    ? "bg-amber-50 text-amber-600"
-                                    : "bg-red-50 text-red-500"
-                              }`}
-                            >
-                              {question.difficulty}
-                            </span>
+                  filteredQuestions.map(
+                    (question) => {
+                      const isSolved =
+                        solvedQuestionIds.has(
+                          question.id,
+                        );
 
-                            <span className="rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-600">
-                              {question.questionType}
-                            </span>
+                      return (
+                        <Link
+                          key={question.id}
+                          to={`/question/${question.id}`}
+                          className="block rounded-lg border border-gray-100 p-5 transition hover:border-gray-200 hover:bg-gray-50 hover:shadow-sm"
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                              {/* Difficulty + type + category */}
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span
+                                  className={`rounded-md px-2 py-1 text-xs font-medium ${
+                                    question.difficulty ===
+                                    "Easy"
+                                      ? "bg-emerald-50 text-emerald-600"
+                                      : question.difficulty ===
+                                          "Medium"
+                                        ? "bg-amber-50 text-amber-600"
+                                        : "bg-red-50 text-red-500"
+                                  }`}
+                                >
+                                  {
+                                    question.difficulty
+                                  }
+                                </span>
 
-                            <span className="text-xs text-gray-400">
-                              {question.category}
+                                <span className="rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-600">
+                                  {
+                                    question.questionType
+                                  }
+                                </span>
+
+                                <span className="text-xs text-gray-400">
+                                  {question.category}
+                                </span>
+
+                                {isSolved && (
+                                  <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-600">
+                                    <CheckCircle2
+                                      size={12}
+                                    />
+                                    Solved
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Title */}
+                              <h3 className="mt-3 text-[15px] font-semibold text-gray-900">
+                                {question.title}
+                              </h3>
+
+                              {/* Description */}
+                              <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-500">
+                                {
+                                  question.description
+                                }
+                              </p>
+                            </div>
+
+                            {/* Bookmark */}
+                            <span className="shrink-0 rounded-lg p-2 text-gray-400">
+                              <Star size={18} />
                             </span>
                           </div>
 
-                          {/* Title */}
-                          <h3 className="mt-3 text-[15px] font-semibold text-gray-900">
-                            {question.title}
-                          </h3>
+                          {/* Tags */}
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {question.languages.map(
+                              (language) => (
+                                <span
+                                  key={language}
+                                  className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500"
+                                >
+                                  {language}
+                                </span>
+                              ),
+                            )}
 
-                          {/* Description */}
-                          <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-500">
-                            {question.description}
-                          </p>
-                        </div>
+                            {question.tags.map(
+                              (tag) => (
+                                <span
+                                  key={tag}
+                                  className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500"
+                                >
+                                  {tag}
+                                </span>
+                              ),
+                            )}
 
-                        {/* Bookmark */}
-                        <span className="shrink-0 rounded-lg p-2 text-gray-400">
-                          <Star size={18} />
-                        </span>
-                      </div>
-
-                      {/* Tags */}
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {question.languages.map((language) => (
-                          <span
-                            key={language}
-                            className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500"
-                          >
-                            {language}
-                          </span>
-                        ))}
-
-                        {question.tags.map((tag) => (
-                          <span
-                            key={tag}
-                            className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500"
-                          >
-                            {tag}
-                          </span>
-                        ))}
-
-                        {question.companies.map((company) => (
-                          <span
-                            key={company}
-                            className="rounded-md bg-purple-50 px-2 py-1 text-xs text-purple-600"
-                          >
-                            {company}
-                          </span>
-                        ))}
-                      </div>
-                    </Link>
-                  ))
+                            {question.companies.map(
+                              (company) => (
+                                <span
+                                  key={company}
+                                  className="rounded-md bg-purple-50 px-2 py-1 text-xs text-purple-600"
+                                >
+                                  {company}
+                                </span>
+                              ),
+                            )}
+                          </div>
+                        </Link>
+                      );
+                    },
+                  )
                 ) : (
                   <div className="rounded-lg border border-dashed border-gray-200 px-6 py-12 text-center">
                     <Search
