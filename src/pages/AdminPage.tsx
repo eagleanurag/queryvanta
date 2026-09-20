@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import type { ChangeEvent } from "react";
 
 import {
   ArrowLeft,
   CheckCircle2,
+  Download,
   Eye,
   Pencil,
   Plus,
   Table2,
   Trash2,
+  Upload,
   X,
   XCircle,
 } from "lucide-react";
@@ -28,8 +31,10 @@ import {
   clearAdminQuestions,
   deleteAdminQuestion,
   getAdminQuestions,
+  importAdminQuestions,
   saveAdminQuestion,
   updateAdminQuestion,
+  validateImportedQuestions,
 } from "../lib/adminQuestions";
 
 const COLUMN_TYPES: ColumnType[] = [
@@ -172,6 +177,9 @@ function AdminPage() {
 
   const [confirmClearAll, setConfirmClearAll] =
     useState(false);
+
+  const fileInputRef =
+    useRef<HTMLInputElement | null>(null);
 
   const [editingQuestionId, setEditingQuestionId] =
     useState<string | null>(
@@ -640,6 +648,95 @@ function AdminPage() {
     setEditingQuestionId(null);
     setErrors([]);
     resetForm();
+  };
+
+  const handleExport = () => {
+    try {
+      const exportText = JSON.stringify(
+        getAdminQuestions(),
+        null,
+        2,
+      );
+
+      const blob = new Blob([exportText], {
+        type: "application/json",
+      });
+
+      const url =
+        window.URL.createObjectURL(blob);
+
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download =
+        "queryvanta-admin-questions.json";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+
+      window.URL.revokeObjectURL(url);
+    } catch {
+      setErrors([
+        "Export failed: unable to create the export file.",
+      ]);
+    }
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImportFile = async (
+    event: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    let parsedFile: unknown;
+
+    try {
+      parsedFile = JSON.parse(await file.text());
+    } catch {
+      setErrors([
+        "Import failed: file does not contain valid JSON.",
+      ]);
+      setSuccessMessage("");
+      setCreatedQuestionId("");
+      return;
+    }
+
+    const validation =
+      validateImportedQuestions(parsedFile);
+
+    if (!validation.valid) {
+      setErrors([validation.error]);
+      setSuccessMessage("");
+      setCreatedQuestionId("");
+      return;
+    }
+
+    const summary = importAdminQuestions(
+      validation.questions,
+    );
+
+    setAdminQuestions(summary.questions);
+    setErrors([]);
+    setSuccessMessage(
+      `Imported ${summary.imported} ${
+        summary.imported === 1
+          ? "question"
+          : "questions"
+      }. Skipped ${summary.skipped} ${
+        summary.skipped === 1
+          ? "duplicate ID"
+          : "duplicate IDs"
+      }.`,
+    );
+    setCreatedQuestionId("");
   };
 
   return (
@@ -1181,27 +1278,56 @@ function AdminPage() {
 
           {/* Admin question list */}
           <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-semibold text-gray-900">
                 Local questions
               </h2>
 
-              {adminQuestions.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleClearAll}
-                  className={`rounded-lg border px-3 py-1.5 text-xs ${
-                    confirmClearAll
-                      ? "border-red-300 bg-red-50 font-medium text-red-600 hover:bg-red-100"
-                      : "border-gray-200 text-gray-500 hover:bg-gray-50"
-                  }`}
+                  onClick={handleExport}
+                  className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
                 >
-                  {confirmClearAll
-                    ? "Click again to confirm clear all"
-                    : "Clear all"}
+                  <Download size={13} />
+                  Export Questions
                 </button>
-              )}
+
+                <button
+                  type="button"
+                  onClick={handleImportClick}
+                  className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                >
+                  <Upload size={13} />
+                  Import Questions
+                </button>
+
+                {adminQuestions.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearAll}
+                    className={`rounded-lg border px-3 py-1.5 text-xs ${
+                      confirmClearAll
+                        ? "border-red-300 bg-red-50 font-medium text-red-600 hover:bg-red-100"
+                        : "border-gray-200 text-gray-500 hover:bg-gray-50"
+                    }`}
+                  >
+                    {confirmClearAll
+                      ? "Click again to confirm clear all"
+                      : "Clear all"}
+                  </button>
+                )}
+              </div>
             </div>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              onChange={handleImportFile}
+              className="hidden"
+              aria-label="Import questions from a JSON file"
+            />
 
             {adminQuestions.length === 0 ? (
               <p className="mt-3 text-sm text-gray-400">
