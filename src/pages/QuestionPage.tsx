@@ -9,6 +9,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  History,
   Loader2,
   Play,
   RotateCcw,
@@ -32,6 +33,12 @@ import type { PGlite } from "@electric-sql/pglite";
 
 import { questions } from "../data/questions";
 import type { TableDefinition } from "../data/questions";
+import {
+  clearAttempts,
+  getAttempts,
+  recordAttempt,
+} from "../lib/attempts";
+import type { QuestionAttempt } from "../lib/attempts";
 import { createQuestionDatabase } from "../lib/pglite";
 import {
   isQuestionSolved,
@@ -342,6 +349,10 @@ function QuestionPage() {
       : false,
   );
 
+  const [attempts, setAttempts] = useState<QuestionAttempt[]>(
+    () => (question ? getAttempts(question.id) : []),
+  );
+
   const databaseRef =
     useRef<PGlite | null>(null);
 
@@ -370,6 +381,10 @@ function QuestionPage() {
     setValidationMessage("");
     setIsCorrect(null);
     setIsCopied(false);
+
+    setAttempts(
+      question ? getAttempts(question.id) : [],
+    );
 
     setIsSolved(
       question
@@ -488,6 +503,8 @@ function QuestionPage() {
       setExecutionTime(elapsed);
       setExecutionStatus("success");
 
+      let attemptCorrect = false;
+
       if (
         currentQuestion.validation?.type ===
         "result"
@@ -504,6 +521,8 @@ function QuestionPage() {
           validation.message,
         );
 
+        attemptCorrect = validation.correct;
+
         if (validation.correct) {
           markQuestionSolved(
             currentQuestion.id,
@@ -512,6 +531,15 @@ function QuestionPage() {
           setIsSolved(true);
         }
       }
+
+      setAttempts(
+        recordAttempt(currentQuestion.id, {
+          executedSuccessfully: true,
+          isCorrect: attemptCorrect,
+          rowCount: result.rows.length,
+          executionTimeMs: elapsed,
+        }),
+      );
     } catch (err) {
       const elapsed =
         performance.now() - startTime;
@@ -526,6 +554,17 @@ function QuestionPage() {
       setExecutionStatus("error");
       setValidationMessage("");
       setIsCorrect(null);
+
+      if (currentQuestion) {
+        setAttempts(
+          recordAttempt(currentQuestion.id, {
+            executedSuccessfully: false,
+            isCorrect: false,
+            rowCount: 0,
+            executionTimeMs: elapsed,
+          }),
+        );
+      }
     }
   };
 
@@ -575,6 +614,15 @@ function QuestionPage() {
       );
 
     return result.rows;
+  };
+
+  const handleClearHistory = () => {
+    if (!question) {
+      return;
+    }
+
+    clearAttempts(question.id);
+    setAttempts([]);
   };
 
   if (!question) {
@@ -1114,6 +1162,110 @@ function QuestionPage() {
               </div>
             </section>
           </div>
+
+          <section className="mt-6 rounded-xl border border-gray-200 bg-white shadow-sm">
+            <div className="flex items-center gap-2 border-b border-gray-100 px-5 py-4">
+              <History
+                size={16}
+                className="text-gray-500"
+              />
+
+              <h2 className="font-semibold text-gray-900">
+                Attempt History
+              </h2>
+
+              <span className="text-xs text-gray-400">
+                {attempts.length}{" "}
+                {attempts.length === 1
+                  ? "attempt"
+                  : "attempts"}
+              </span>
+
+              {attempts.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearHistory}
+                  className="ml-auto rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50"
+                >
+                  Clear history
+                </button>
+              )}
+            </div>
+
+            <div className="p-5">
+              {attempts.length === 0 ? (
+                <p className="text-xs text-gray-400">
+                  No attempts yet. Run your query to
+                  start your history.
+                </p>
+              ) : (
+                <ul className="divide-y divide-gray-100">
+                  {[...attempts]
+                    .reverse()
+                    .map((attempt, index) => {
+                      const status = !attempt.executedSuccessfully
+                        ? "error"
+                        : attempt.isCorrect
+                          ? "correct"
+                          : "incorrect";
+
+                      return (
+                        <li
+                          key={`${attempt.timestamp}-${index}`}
+                          className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2.5"
+                        >
+                          <span
+                            className={`inline-flex items-center gap-1.5 text-xs font-medium ${
+                              status === "correct"
+                                ? "text-emerald-600"
+                                : status === "error"
+                                  ? "text-red-600"
+                                  : "text-amber-600"
+                            }`}
+                          >
+                            {status === "correct" ? (
+                              <CheckCircle2 size={13} />
+                            ) : (
+                              <XCircle size={13} />
+                            )}
+
+                            {status === "correct"
+                              ? "Correct"
+                              : status === "error"
+                                ? "Error"
+                                : "Incorrect"}
+                          </span>
+
+                          <span className="text-xs text-gray-500">
+                            {attempt.rowCount}{" "}
+                            {attempt.rowCount === 1
+                              ? "row"
+                              : "rows"}
+                          </span>
+
+                          {attempt.executionTimeMs !==
+                            null && (
+                            <span className="flex items-center gap-1 text-xs text-gray-500">
+                              <Clock3 size={12} />
+                              {attempt.executionTimeMs.toFixed(
+                                2,
+                              )}{" "}
+                              ms
+                            </span>
+                          )}
+
+                          <span className="ml-auto text-xs text-gray-400">
+                            {new Date(
+                              attempt.timestamp,
+                            ).toLocaleString()}
+                          </span>
+                        </li>
+                      );
+                    })}
+                </ul>
+              )}
+            </div>
+          </section>
 
           <nav className="mt-6 flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <button
