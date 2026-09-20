@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock3,
@@ -9,6 +10,7 @@ import {
   Loader2,
   Play,
   RotateCcw,
+  Table2,
   XCircle,
 } from "lucide-react";
 
@@ -27,6 +29,7 @@ import {
 import type { PGlite } from "@electric-sql/pglite";
 
 import { questions } from "../data/questions";
+import type { TableDefinition } from "../data/questions";
 import { createQuestionDatabase } from "../lib/pglite";
 import {
   isQuestionSolved,
@@ -39,6 +42,73 @@ type ExecutionStatus =
   | "running"
   | "success"
   | "error";
+
+function SchemaTable({ table }: { table: TableDefinition }) {
+  const [isExpanded, setIsExpanded] =
+    useState(true);
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() =>
+          setIsExpanded((previous) => !previous)
+        }
+        aria-expanded={isExpanded}
+        className="flex w-full items-center gap-2 py-3 text-left"
+      >
+        {isExpanded ? (
+          <ChevronDown
+            size={15}
+            className="shrink-0 text-gray-400"
+          />
+        ) : (
+          <ChevronRight
+            size={15}
+            className="shrink-0 text-gray-400"
+          />
+        )}
+
+        <Table2
+          size={15}
+          className="shrink-0 text-gray-500"
+        />
+
+        <span className="font-mono text-sm font-medium text-gray-800">
+          {table.name}
+        </span>
+
+        <span className="ml-auto text-xs text-gray-400">
+          {table.columns.length}{" "}
+          {table.columns.length === 1
+            ? "column"
+            : "columns"}
+        </span>
+      </button>
+
+      {isExpanded && (
+        <div className="pb-3 pl-7">
+          <div className="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
+            {table.columns.map((column) => (
+              <div
+                key={column.name}
+                className="flex items-center justify-between gap-4 bg-gray-50/60 px-4 py-2"
+              >
+                <span className="font-mono text-xs text-gray-700">
+                  {column.name}
+                </span>
+
+                <span className="font-mono text-xs text-gray-400">
+                  {column.type}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function QuestionPage() {
   const { questionId } = useParams();
@@ -439,6 +509,37 @@ function QuestionPage() {
               ))}
             </div>
           </section>
+
+          {database && database.tables.length > 0 && (
+            <section className="mt-6 rounded-xl border border-gray-200 bg-white shadow-sm">
+              <div className="flex items-center gap-2 border-b border-gray-100 px-5 py-4">
+                <Table2
+                  size={16}
+                  className="text-gray-500"
+                />
+
+                <h2 className="font-semibold text-gray-900">
+                  Schema Explorer
+                </h2>
+
+                <span className="text-xs text-gray-400">
+                  {database.tables.length}{" "}
+                  {database.tables.length === 1
+                    ? "table"
+                    : "tables"}
+                </span>
+              </div>
+
+              <div className="divide-y divide-gray-100 px-5">
+                {database.tables.map((table) => (
+                  <SchemaTable
+                    key={`${question.id}-${table.name}`}
+                    table={table}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
 
           <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
             <section className="rounded-xl border border-gray-200 bg-white shadow-sm">
