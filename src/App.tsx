@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
 import {
   BarChart3,
@@ -40,7 +41,9 @@ function App() {
 
   const difficulties = [
     "All",
-    ...Array.from(new Set(questions.map((question) => question.difficulty))),
+    ...Array.from(
+      new Set(questions.map((question) => question.difficulty)),
+    ),
   ];
 
   const questionTypes = [
@@ -75,8 +78,12 @@ function App() {
       const matchesSearch =
         normalizedSearch === "" ||
         question.title.toLowerCase().includes(normalizedSearch) ||
-        question.description.toLowerCase().includes(normalizedSearch) ||
-        question.category.toLowerCase().includes(normalizedSearch) ||
+        question.description
+          .toLowerCase()
+          .includes(normalizedSearch) ||
+        question.category
+          .toLowerCase()
+          .includes(normalizedSearch) ||
         question.tags.some((tag) =>
           tag.toLowerCase().includes(normalizedSearch),
         );
@@ -411,12 +418,13 @@ function App() {
               <div className="space-y-4 p-5">
                 {filteredQuestions.length > 0 ? (
                   filteredQuestions.map((question) => (
-                    <div
+                    <Link
                       key={question.id}
-                      className="rounded-lg border border-gray-100 p-5 transition hover:border-gray-200 hover:shadow-sm"
+                      to={`/question/${question.id}`}
+                      className="block rounded-lg border border-gray-100 p-5 transition hover:border-gray-200 hover:bg-gray-50 hover:shadow-sm"
                     >
                       <div className="flex items-start justify-between gap-4">
-                        <div>
+                        <div className="min-w-0">
                           {/* Difficulty + type + category */}
                           <div className="flex flex-wrap items-center gap-2">
                             <span
@@ -452,9 +460,9 @@ function App() {
                         </div>
 
                         {/* Bookmark */}
-                        <button className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700">
+                        <span className="shrink-0 rounded-lg p-2 text-gray-400">
                           <Star size={18} />
-                        </button>
+                        </span>
                       </div>
 
                       {/* Tags */}
@@ -486,7 +494,7 @@ function App() {
                           </span>
                         ))}
                       </div>
-                    </div>
+                    </Link>
                   ))
                 ) : (
                   <div className="rounded-lg border border-dashed border-gray-200 px-6 py-12 text-center">
