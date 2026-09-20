@@ -50,6 +50,8 @@ function App() {
     useState("All");
   const [selectedCompany, setSelectedCompany] =
     useState("All");
+  const [selectedStatus, setSelectedStatus] =
+    useState("All");
 
   const [solvedQuestionIds, setSolvedQuestionIds] =
     useState<Set<string>>(
@@ -175,6 +177,8 @@ function App() {
     ),
   ];
 
+  const statuses = ["All", "Solved", "Unsolved"];
+
   const filteredQuestions = useMemo(() => {
     const normalizedSearch =
       searchTerm.trim().toLowerCase();
@@ -223,13 +227,20 @@ function App() {
           selectedCompany,
         );
 
+      const matchesStatus =
+        selectedStatus === "All" ||
+        (selectedStatus === "Solved"
+          ? solvedQuestionIds.has(question.id)
+          : !solvedQuestionIds.has(question.id));
+
       return (
         matchesBookmark &&
         matchesSearch &&
         matchesDifficulty &&
         matchesQuestionType &&
         matchesLanguage &&
-        matchesCompany
+        matchesCompany &&
+        matchesStatus
       );
     });
   }, [
@@ -238,6 +249,8 @@ function App() {
     selectedQuestionType,
     selectedLanguage,
     selectedCompany,
+    selectedStatus,
+    solvedQuestionIds,
     showBookmarkedOnly,
     bookmarkedQuestionIds,
   ]);
@@ -278,7 +291,8 @@ function App() {
     selectedDifficulty !== "All" ||
     selectedQuestionType !== "All" ||
     selectedLanguage !== "All" ||
-    selectedCompany !== "All";
+    selectedCompany !== "All" ||
+    selectedStatus !== "All";
 
   const clearFilters = () => {
     setSearchTerm("");
@@ -286,6 +300,7 @@ function App() {
     setSelectedQuestionType("All");
     setSelectedLanguage("All");
     setSelectedCompany("All");
+    setSelectedStatus("All");
   };
 
   return (
@@ -448,10 +463,12 @@ function App() {
               selectedLanguage
             }
             selectedCompany={selectedCompany}
+            selectedStatus={selectedStatus}
             questionTypes={questionTypes}
             difficulties={difficulties}
             languages={languages}
             companies={companies}
+            statuses={statuses}
             hasActiveFilters={hasActiveFilters}
             setSearchTerm={setSearchTerm}
             setSelectedQuestionType={
@@ -466,6 +483,7 @@ function App() {
             setSelectedCompany={
               setSelectedCompany
             }
+            setSelectedStatus={setSelectedStatus}
             clearFilters={clearFilters}
           />
 

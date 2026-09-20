@@ -6,16 +6,19 @@ type QuestionFiltersProps = {
   selectedDifficulty: string;
   selectedLanguage: string;
   selectedCompany: string;
+  selectedStatus: string;
   questionTypes: string[];
   difficulties: string[];
   languages: string[];
   companies: string[];
+  statuses: string[];
   hasActiveFilters: boolean;
   setSearchTerm: (value: string) => void;
   setSelectedQuestionType: (value: string) => void;
   setSelectedDifficulty: (value: string) => void;
   setSelectedLanguage: (value: string) => void;
   setSelectedCompany: (value: string) => void;
+  setSelectedStatus: (value: string) => void;
   clearFilters: () => void;
 };
 
@@ -25,16 +28,19 @@ function QuestionFilters({
   selectedDifficulty,
   selectedLanguage,
   selectedCompany,
+  selectedStatus,
   questionTypes,
   difficulties,
   languages,
   companies,
+  statuses,
   hasActiveFilters,
   setSearchTerm,
   setSelectedQuestionType,
   setSelectedDifficulty,
   setSelectedLanguage,
   setSelectedCompany,
+  setSelectedStatus,
   clearFilters,
 }: QuestionFiltersProps) {
   return (
@@ -191,6 +197,35 @@ function QuestionFilters({
                 value={company}
               >
                 {company}
+              </option>
+            ))}
+        </select>
+
+        {/* Status */}
+        <select
+          value={selectedStatus}
+          onChange={(event) =>
+            setSelectedStatus(
+              event.target.value,
+            )
+          }
+          className="min-w-[145px] cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-600 outline-none hover:bg-gray-50"
+        >
+          <option value="All">
+            All Statuses
+          </option>
+
+          {statuses
+            .filter(
+              (status) =>
+                status !== "All",
+            )
+            .map((status) => (
+              <option
+                key={status}
+                value={status}
+              >
+                {status}
               </option>
             ))}
         </select>
