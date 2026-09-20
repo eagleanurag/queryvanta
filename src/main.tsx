@@ -21,6 +21,11 @@ createRoot(document.getElementById("root")!).render(
         <Route path="/admin" element={<AdminPage />} />
 
         <Route
+          path="/admin/preview"
+          element={<QuestionPage />}
+        />
+
+        <Route
           path="/question/:questionId"
           element={<QuestionPage />}
         />

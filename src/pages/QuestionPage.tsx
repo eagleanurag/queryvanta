@@ -26,6 +26,7 @@ import {
 
 import {
   Link,
+  useLocation,
   useNavigate,
   useParams,
 } from "react-router-dom";
@@ -33,7 +34,9 @@ import {
 import type { PGlite } from "@electric-sql/pglite";
 
 import { questions } from "../data/questions";
+import type { Question } from "../data/questions";
 import type { TableDefinition } from "../data/questions";
+import type { AdminFormDraft } from "./AdminPage";
 import { getAdminQuestions } from "../lib/adminQuestions";
 import {
   clearAttempts,
@@ -297,15 +300,33 @@ function SchemaTable({
 function QuestionPage() {
   const { questionId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const locationState = location.state as {
+    previewQuestion?: Question;
+    formDraft?: AdminFormDraft;
+  } | null;
+
+  const previewQuestion =
+    locationState?.previewQuestion ?? null;
+
+  const isPreviewRoute =
+    location.pathname === "/admin/preview";
+
+  const isPreview =
+    isPreviewRoute && previewQuestion !== null;
 
   const allQuestions = useMemo(
     () => [...questions, ...getAdminQuestions()],
     [questionId],
   );
 
-  const question = allQuestions.find(
-    (item) => item.id === questionId,
-  );
+  const question =
+    isPreviewRoute && previewQuestion !== null
+      ? previewQuestion
+      : allQuestions.find(
+          (item) => item.id === questionId,
+        );
 
   const currentQuestionIndex = allQuestions.findIndex(
     (item) => item.id === questionId,
@@ -351,13 +372,16 @@ function QuestionPage() {
     useState<boolean | null>(null);
 
   const [isSolved, setIsSolved] = useState(
-    question
+    question && !isPreview
       ? isQuestionSolved(question.id)
       : false,
   );
 
   const [attempts, setAttempts] = useState<QuestionAttempt[]>(
-    () => (question ? getAttempts(question.id) : []),
+    () =>
+      question && !isPreview
+        ? getAttempts(question.id)
+        : [],
   );
 
   const databaseRef =
@@ -390,11 +414,13 @@ function QuestionPage() {
     setIsCopied(false);
 
     setAttempts(
-      question ? getAttempts(question.id) : [],
+      question && !isPreview
+        ? getAttempts(question.id)
+        : [],
     );
 
     setIsSolved(
-      question
+      question && !isPreview
         ? isQuestionSolved(question.id)
         : false,
     );
@@ -530,7 +556,7 @@ function QuestionPage() {
 
         attemptCorrect = validation.correct;
 
-        if (validation.correct) {
+        if (validation.correct && !isPreview) {
           markQuestionSolved(
             currentQuestion.id,
           );
@@ -539,14 +565,16 @@ function QuestionPage() {
         }
       }
 
-      setAttempts(
-        recordAttempt(currentQuestion.id, {
-          executedSuccessfully: true,
-          isCorrect: attemptCorrect,
-          rowCount: result.rows.length,
-          executionTimeMs: elapsed,
-        }),
-      );
+      if (!isPreview) {
+        setAttempts(
+          recordAttempt(currentQuestion.id, {
+            executedSuccessfully: true,
+            isCorrect: attemptCorrect,
+            rowCount: result.rows.length,
+            executionTimeMs: elapsed,
+          }),
+        );
+      }
     } catch (err) {
       const elapsed =
         performance.now() - startTime;
@@ -562,7 +590,7 @@ function QuestionPage() {
       setValidationMessage("");
       setIsCorrect(null);
 
-      if (currentQuestion) {
+      if (currentQuestion && !isPreview) {
         setAttempts(
           recordAttempt(currentQuestion.id, {
             executedSuccessfully: false,
@@ -632,6 +660,31 @@ function QuestionPage() {
     setAttempts([]);
   };
 
+  if (isPreviewRoute && previewQuestion === null) {
+    return (
+      <div className="min-h-screen bg-[#f6f7f9] p-8">
+        <div className="mx-auto max-w-3xl rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
+          <h1 className="text-xl font-semibold text-gray-900">
+            Preview is unavailable
+          </h1>
+
+          <p className="mt-2 text-sm text-gray-500">
+            Preview is unavailable. Return to the
+            builder.
+          </p>
+
+          <Link
+            to="/admin"
+            className="mt-6 inline-flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+          >
+            <ArrowLeft size={16} />
+            Back to Builder
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   if (!question) {
     return (
       <div className="min-h-screen bg-[#f6f7f9] p-8">
@@ -660,28 +713,56 @@ function QuestionPage() {
     <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
       <header className="border-b border-gray-200 bg-white">
         <div className="flex h-[72px] items-center px-8">
-          <Link
-            to="/"
-            className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900"
-          >
-            <ArrowLeft size={17} />
-            Back to Questions
-          </Link>
-
-          <div className="mx-4 h-5 w-px bg-gray-200" />
-
-          <span className="text-sm font-medium text-gray-900">
-            Practice
-          </span>
-
-          {isSolved && (
+          {isPreview ? (
             <>
+              <Link
+                to="/admin"
+                state={
+                  locationState?.formDraft
+                    ? {
+                        formDraft:
+                          locationState.formDraft,
+                      }
+                    : undefined
+                }
+                className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900"
+              >
+                <ArrowLeft size={17} />
+                Back to Builder
+              </Link>
+
               <div className="mx-4 h-5 w-px bg-gray-200" />
 
-              <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-600">
-                <CheckCircle2 size={13} />
-                Solved
+              <span className="rounded-md bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700">
+                Admin Preview
               </span>
+            </>
+          ) : (
+            <>
+              <Link
+                to="/"
+                className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900"
+              >
+                <ArrowLeft size={17} />
+                Back to Questions
+              </Link>
+
+              <div className="mx-4 h-5 w-px bg-gray-200" />
+
+              <span className="text-sm font-medium text-gray-900">
+                Practice
+              </span>
+
+              {isSolved && (
+                <>
+                  <div className="mx-4 h-5 w-px bg-gray-200" />
+
+                  <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-600">
+                    <CheckCircle2 size={13} />
+                    Solved
+                  </span>
+                </>
+              )}
             </>
           )}
         </div>
@@ -1274,7 +1355,8 @@ function QuestionPage() {
             </div>
           </section>
 
-          <nav className="mt-6 flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+          {!isPreview && (
+            <nav className="mt-6 flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <button
               type="button"
               onClick={() => {
@@ -1312,7 +1394,8 @@ function QuestionPage() {
               Next Question
               <ChevronRight size={16} />
             </button>
-          </nav>
+            </nav>
+          )}
         </div>
       </main>
     </div>

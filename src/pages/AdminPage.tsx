@@ -3,6 +3,7 @@ import { useState } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
+  Eye,
   Pencil,
   Plus,
   Table2,
@@ -11,7 +12,11 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { Link } from "react-router-dom";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 
 import type {
   ColumnType,
@@ -54,6 +59,20 @@ type TableDraft = {
   sampleRowsText: string;
 };
 
+export type AdminFormDraft = {
+  title: string;
+  description: string;
+  difficulty: Difficulty;
+  category: string;
+  companiesText: string;
+  languagesText: string;
+  tagsText: string;
+  starterSql: string;
+  expectedResultText: string;
+  tables: TableDraft[];
+  editingQuestionId: string | null;
+};
+
 function createEmptyTable(): TableDraft {
   return {
     name: "",
@@ -77,6 +96,14 @@ function generateQuestionId(): string {
   return `admin-${Date.now()}-${randomSuffix}`;
 }
 
+function generatePreviewId(): string {
+  const randomSuffix = Math.random()
+    .toString(36)
+    .slice(2, 8);
+
+  return `preview-${Date.now()}-${randomSuffix}`;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return (
     typeof value === "object" &&
@@ -92,20 +119,47 @@ const labelClassName =
   "mb-1.5 block text-sm font-medium text-gray-700";
 
 function AdminPage() {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const incomingDraft = (
+    location.state as {
+      formDraft?: AdminFormDraft;
+    } | null
+  )?.formDraft;
+
+  const [title, setTitle] = useState(
+    incomingDraft?.title ?? "",
+  );
+  const [description, setDescription] = useState(
+    incomingDraft?.description ?? "",
+  );
   const [difficulty, setDifficulty] =
-    useState<Difficulty>("Easy");
-  const [category, setCategory] = useState("");
-  const [companiesText, setCompaniesText] = useState("");
-  const [languagesText, setLanguagesText] = useState("");
-  const [tagsText, setTagsText] = useState("");
-  const [starterSql, setStarterSql] = useState("");
+    useState<Difficulty>(
+      incomingDraft?.difficulty ?? "Easy",
+    );
+  const [category, setCategory] = useState(
+    incomingDraft?.category ?? "",
+  );
+  const [companiesText, setCompaniesText] = useState(
+    incomingDraft?.companiesText ?? "",
+  );
+  const [languagesText, setLanguagesText] = useState(
+    incomingDraft?.languagesText ?? "",
+  );
+  const [tagsText, setTagsText] = useState(
+    incomingDraft?.tagsText ?? "",
+  );
+  const [starterSql, setStarterSql] = useState(
+    incomingDraft?.starterSql ?? "",
+  );
   const [expectedResultText, setExpectedResultText] =
-    useState("[]");
-  const [tables, setTables] = useState<TableDraft[]>([
-    createEmptyTable(),
-  ]);
+    useState(
+      incomingDraft?.expectedResultText ?? "[]",
+    );
+  const [tables, setTables] = useState<TableDraft[]>(
+    incomingDraft?.tables ?? [createEmptyTable()],
+  );
 
   const [errors, setErrors] = useState<string[]>([]);
   const [successMessage, setSuccessMessage] = useState("");
@@ -120,7 +174,9 @@ function AdminPage() {
     useState(false);
 
   const [editingQuestionId, setEditingQuestionId] =
-    useState<string | null>(null);
+    useState<string | null>(
+      incomingDraft?.editingQuestionId ?? null,
+    );
 
   const isEditing = editingQuestionId !== null;
 
@@ -231,7 +287,11 @@ function AdminPage() {
     setTables([createEmptyTable()]);
   };
 
-  const handleSubmit = () => {
+  const validateForm = (): {
+    validationErrors: string[];
+    expectedResult: Record<string, unknown>[];
+    tableRows: Record<string, unknown>[][];
+  } => {
     const validationErrors: string[] = [];
 
     if (title.trim() === "") {
@@ -378,17 +438,22 @@ function AdminPage() {
       }
     });
 
-    if (validationErrors.length > 0) {
-      setErrors(validationErrors);
-      setSuccessMessage("");
-      setCreatedQuestionId("");
-      return;
-    }
+    return {
+      validationErrors,
+      expectedResult,
+      tableRows,
+    };
+  };
 
+  const buildQuestion = (
+    id: string,
+    expectedResult: Record<string, unknown>[],
+    tableRows: Record<string, unknown>[][],
+  ): Question => {
     const languages = parseCsv(languagesText);
 
-    const question: Question = {
-      id: editingQuestionId ?? generateQuestionId(),
+    return {
+      id,
       title: title.trim(),
       description: description.trim(),
       difficulty,
@@ -419,6 +484,41 @@ function AdminPage() {
         expectedResult,
       },
     };
+  };
+
+  const captureDraft = (): AdminFormDraft => ({
+    title,
+    description,
+    difficulty,
+    category,
+    companiesText,
+    languagesText,
+    tagsText,
+    starterSql,
+    expectedResultText,
+    tables,
+    editingQuestionId,
+  });
+
+  const handleSubmit = () => {
+    const {
+      validationErrors,
+      expectedResult,
+      tableRows,
+    } = validateForm();
+
+    if (validationErrors.length > 0) {
+      setErrors(validationErrors);
+      setSuccessMessage("");
+      setCreatedQuestionId("");
+      return;
+    }
+
+    const question = buildQuestion(
+      editingQuestionId ?? generateQuestionId(),
+      expectedResult,
+      tableRows,
+    );
 
     const updated = isEditing
       ? updateAdminQuestion(question)
@@ -434,6 +534,36 @@ function AdminPage() {
     setCreatedQuestionId(question.id);
     setEditingQuestionId(null);
     resetForm();
+  };
+
+  const handlePreview = () => {
+    const {
+      validationErrors,
+      expectedResult,
+      tableRows,
+    } = validateForm();
+
+    if (validationErrors.length > 0) {
+      setErrors(validationErrors);
+      setSuccessMessage("");
+      setCreatedQuestionId("");
+      return;
+    }
+
+    setErrors([]);
+
+    const previewQuestion = buildQuestion(
+      generatePreviewId(),
+      expectedResult,
+      tableRows,
+    );
+
+    navigate("/admin/preview", {
+      state: {
+        previewQuestion,
+        formDraft: captureDraft(),
+      },
+    });
   };
 
   const handleEdit = (question: Question) => {
@@ -1028,6 +1158,15 @@ function AdminPage() {
             className="mt-6 w-full rounded-lg bg-gray-900 px-4 py-3 text-sm font-medium text-white hover:bg-gray-800"
           >
             {isEditing ? "Save Changes" : "Create Question"}
+          </button>
+
+          <button
+            type="button"
+            onClick={handlePreview}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50"
+          >
+            <Eye size={15} />
+            Preview Question
           </button>
 
           {isEditing && (
