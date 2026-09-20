@@ -18,6 +18,11 @@ import {
   getSolvedQuestionIds,
   PROGRESS_EVENT,
 } from "./lib/progress";
+import {
+  BOOKMARKS_EVENT,
+  getBookmarkedQuestionIds,
+  toggleQuestionBookmark,
+} from "./lib/bookmarks";
 import QuestionCard from "./components/QuestionCard";
 import QuestionFilters from "./components/QuestionFilters";
 
@@ -51,6 +56,14 @@ function App() {
       () => getSolvedQuestionIds(),
     );
 
+  const [bookmarkedQuestionIds, setBookmarkedQuestionIds] =
+    useState<Set<string>>(
+      () => getBookmarkedQuestionIds(),
+    );
+
+  const [showBookmarkedOnly, setShowBookmarkedOnly] =
+    useState(false);
+
   useEffect(() => {
     const syncProgress = () => {
       setSolvedQuestionIds(
@@ -80,6 +93,43 @@ function App() {
       );
     };
   }, []);
+
+  useEffect(() => {
+    const syncBookmarks = () => {
+      setBookmarkedQuestionIds(
+        getBookmarkedQuestionIds(),
+      );
+    };
+
+    window.addEventListener(
+      BOOKMARKS_EVENT,
+      syncBookmarks,
+    );
+
+    window.addEventListener(
+      "storage",
+      syncBookmarks,
+    );
+
+    return () => {
+      window.removeEventListener(
+        BOOKMARKS_EVENT,
+        syncBookmarks,
+      );
+
+      window.removeEventListener(
+        "storage",
+        syncBookmarks,
+      );
+    };
+  }, []);
+
+  const handleToggleBookmark = (questionId: string) => {
+    toggleQuestionBookmark(questionId);
+    setBookmarkedQuestionIds(
+      getBookmarkedQuestionIds(),
+    );
+  };
 
   const difficulties = [
     "All",
@@ -130,6 +180,10 @@ function App() {
       searchTerm.trim().toLowerCase();
 
     return questions.filter((question) => {
+      const matchesBookmark =
+        !showBookmarkedOnly ||
+        bookmarkedQuestionIds.has(question.id);
+
       const matchesSearch =
         normalizedSearch === "" ||
         question.title
@@ -170,6 +224,7 @@ function App() {
         );
 
       return (
+        matchesBookmark &&
         matchesSearch &&
         matchesDifficulty &&
         matchesQuestionType &&
@@ -183,6 +238,8 @@ function App() {
     selectedQuestionType,
     selectedLanguage,
     selectedCompany,
+    showBookmarkedOnly,
+    bookmarkedQuestionIds,
   ]);
 
   const totalQuestions = questions.length;
@@ -339,9 +396,39 @@ function App() {
               </p>
             </div>
 
-            <button className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 shadow-sm hover:bg-gray-50">
-              <Star size={16} />
+            <button
+              onClick={() =>
+                setShowBookmarkedOnly(
+                  (previous) => !previous,
+                )
+              }
+              aria-pressed={showBookmarkedOnly}
+              className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm shadow-sm ${
+                showBookmarkedOnly
+                  ? "border-gray-900 bg-gray-900 text-white hover:bg-gray-800"
+                  : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              <Star
+                size={16}
+                fill={
+                  showBookmarkedOnly
+                    ? "currentColor"
+                    : "none"
+                }
+              />
               Bookmarks
+              {bookmarkedQuestionIds.size > 0 && (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                    showBookmarkedOnly
+                      ? "bg-white/20 text-white"
+                      : "bg-gray-100 text-gray-600"
+                  }`}
+                >
+                  {bookmarkedQuestionIds.size}
+                </span>
+              )}
             </button>
           </div>
         </header>
@@ -389,14 +476,39 @@ function App() {
               <div className="border-b border-gray-100 px-5 py-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="font-semibold text-gray-900">
+                    <h2 className="flex items-center gap-2 font-semibold text-gray-900">
                       Questions
+                      {showBookmarkedOnly && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-600">
+                          <Star
+                            size={12}
+                            fill="currentColor"
+                          />
+                          Bookmarked
+                        </span>
+                      )}
                     </h2>
 
                     <p className="mt-1 text-xs text-gray-500">
                       Showing{" "}
                       {filteredQuestions.length}{" "}
                       of {totalQuestions} questions
+                      {showBookmarkedOnly && (
+                        <>
+                          {" "}
+                          ·{" "}
+                          <button
+                            onClick={() =>
+                              setShowBookmarkedOnly(
+                                false,
+                              )
+                            }
+                            className="font-medium text-gray-700 underline hover:text-gray-900"
+                          >
+                            Show all
+                          </button>
+                        </>
+                      )}
                     </p>
                   </div>
 
@@ -417,9 +529,58 @@ function App() {
                         isSolved={solvedQuestionIds.has(
                           question.id,
                         )}
+                        isBookmarked={bookmarkedQuestionIds.has(
+                          question.id,
+                        )}
+                        onToggleBookmark={
+                          handleToggleBookmark
+                        }
                       />
                     ),
                   )
+                ) : showBookmarkedOnly ? (
+                  <div className="rounded-lg border border-dashed border-gray-200 px-6 py-12 text-center">
+                    <Star
+                      size={28}
+                      className="mx-auto text-gray-300"
+                    />
+
+                    <h3 className="mt-3 text-sm font-semibold text-gray-800">
+                      {bookmarkedQuestionIds.size ===
+                      0
+                        ? "No bookmarks yet"
+                        : "No bookmarked questions found"}
+                    </h3>
+
+                    <p className="mt-1 text-sm text-gray-500">
+                      {bookmarkedQuestionIds.size ===
+                      0
+                        ? "Bookmark questions with the star icon to find them here later."
+                        : "Try changing your search or filters."}
+                    </p>
+
+                    <div className="mt-4 flex items-center justify-center gap-2">
+                      {hasActiveFilters && (
+                        <button
+                          onClick={clearFilters}
+                          className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+                        >
+                          Clear Filters
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() =>
+                          setShowBookmarkedOnly(
+                            false,
+                          )
+                        }
+                        className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
+                      >
+                        Show all questions
+                      </button>
+                    </div>
+                  </div>
                 ) : (
                   <div className="rounded-lg border border-dashed border-gray-200 px-6 py-12 text-center">
                     <Search

@@ -10,18 +10,22 @@ import type { Question } from "../data/questions";
 type QuestionCardProps = {
   question: Question;
   isSolved: boolean;
+  isBookmarked: boolean;
+  onToggleBookmark: (questionId: string) => void;
 };
 
 function QuestionCard({
   question,
   isSolved,
+  isBookmarked,
+  onToggleBookmark,
 }: QuestionCardProps) {
   return (
-    <Link
-      to={`/question/${question.id}`}
-      className="block rounded-lg border border-gray-100 p-5 transition hover:border-gray-200 hover:bg-gray-50 hover:shadow-sm"
-    >
-      <div className="flex items-start justify-between gap-4">
+    <div className="relative">
+      <Link
+        to={`/question/${question.id}`}
+        className="block rounded-lg border border-gray-100 p-5 pr-16 transition hover:border-gray-200 hover:bg-gray-50 hover:shadow-sm"
+      >
         <div className="min-w-0">
           {/* Difficulty + type + category + solved */}
           <div className="flex flex-wrap items-center gap-2">
@@ -62,44 +66,72 @@ function QuestionCard({
           <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-500">
             {question.description}
           </p>
+
+          {/* Tags */}
+          <div className="mt-4 flex flex-wrap gap-2">
+            {question.languages.map((language) => (
+              <span
+                key={language}
+                className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500"
+              >
+                {language}
+              </span>
+            ))}
+
+            {question.tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500"
+              >
+                {tag}
+              </span>
+            ))}
+
+            {question.companies.map((company) => (
+              <span
+                key={company}
+                className="rounded-md bg-purple-50 px-2 py-1 text-xs text-purple-600"
+              >
+                {company}
+              </span>
+            ))}
+          </div>
         </div>
+      </Link>
 
-        {/* Bookmark */}
-        <span className="shrink-0 rounded-lg p-2 text-gray-400">
-          <Star size={18} />
-        </span>
-      </div>
-
-      {/* Tags */}
-      <div className="mt-4 flex flex-wrap gap-2">
-        {question.languages.map((language) => (
-          <span
-            key={language}
-            className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500"
-          >
-            {language}
-          </span>
-        ))}
-
-        {question.tags.map((tag) => (
-          <span
-            key={tag}
-            className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500"
-          >
-            {tag}
-          </span>
-        ))}
-
-        {question.companies.map((company) => (
-          <span
-            key={company}
-            className="rounded-md bg-purple-50 px-2 py-1 text-xs text-purple-600"
-          >
-            {company}
-          </span>
-        ))}
-      </div>
-    </Link>
+      {/* Bookmark */}
+      <button
+        type="button"
+        onClick={() =>
+          onToggleBookmark(question.id)
+        }
+        aria-label={
+          isBookmarked
+            ? "Remove bookmark"
+            : "Bookmark question"
+        }
+        aria-pressed={isBookmarked}
+        title={
+          isBookmarked
+            ? "Remove bookmark"
+            : "Bookmark question"
+        }
+        className={`absolute right-5 top-5 rounded-lg p-2 transition ${
+          isBookmarked
+            ? "text-amber-500 hover:bg-amber-50"
+            : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+        }`}
+      >
+        <Star
+          size={18}
+          fill={
+            isBookmarked
+              ? "currentColor"
+              : "none"
+          }
+        />
+      </button>
+    </div>
   );
 }
 
