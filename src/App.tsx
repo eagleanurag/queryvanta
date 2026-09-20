@@ -446,40 +446,73 @@ function App() {
               </p>
             </div>
 
-            <button
-              onClick={() =>
-                setShowBookmarkedOnly(
-                  (previous) => !previous,
-                )
-              }
-              aria-pressed={showBookmarkedOnly}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm shadow-sm ${
-                showBookmarkedOnly
-                  ? "border-gray-900 bg-gray-900 text-white hover:bg-gray-800"
-                  : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              <Star
-                size={16}
-                fill={
-                  showBookmarkedOnly
-                    ? "currentColor"
-                    : "none"
-                }
-              />
-              Bookmarks
-              {bookmarkedQuestionIds.size > 0 && (
-                <span
-                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                    showBookmarkedOnly
-                      ? "bg-white/20 text-white"
-                      : "bg-gray-100 text-gray-600"
-                  }`}
+            <div className="flex items-center gap-4">
+              <div className="hidden sm:block">
+                <div className="flex items-center justify-end gap-1.5 text-xs text-gray-500">
+                  <span>
+                    Solved {solvedQuestions} /{" "}
+                    {totalQuestions}
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span className="font-medium text-gray-700">
+                    {completionPercentage}%
+                  </span>
+                </div>
+
+                <div
+                  className="mt-1.5 h-1.5 w-40 overflow-hidden rounded-full bg-gray-100"
+                  role="progressbar"
+                  aria-valuenow={
+                    completionPercentage
+                  }
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label="Overall progress"
                 >
-                  {bookmarkedQuestionIds.size}
-                </span>
-              )}
-            </button>
+                  <div
+                    className="h-full rounded-full bg-emerald-500 transition-all"
+                    style={{
+                      width: `${completionPercentage}%`,
+                    }}
+                  />
+                </div>
+              </div>
+
+              <button
+                onClick={() =>
+                  setShowBookmarkedOnly(
+                    (previous) => !previous,
+                  )
+                }
+                aria-pressed={showBookmarkedOnly}
+                className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm shadow-sm ${
+                  showBookmarkedOnly
+                    ? "border-gray-900 bg-gray-900 text-white hover:bg-gray-800"
+                    : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                <Star
+                  size={16}
+                  fill={
+                    showBookmarkedOnly
+                      ? "currentColor"
+                      : "none"
+                  }
+                />
+                Bookmarks
+                {bookmarkedQuestionIds.size > 0 && (
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                      showBookmarkedOnly
+                        ? "bg-white/20 text-white"
+                        : "bg-gray-100 text-gray-600"
+                    }`}
+                  >
+                    {bookmarkedQuestionIds.size}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
         </header>
 
