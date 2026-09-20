@@ -1,6 +1,8 @@
 import {
   ArrowLeft,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   Loader2,
   Play,
@@ -16,6 +18,7 @@ import {
 
 import {
   Link,
+  useNavigate,
   useParams,
 } from "react-router-dom";
 
@@ -37,10 +40,26 @@ type ExecutionStatus =
 
 function QuestionPage() {
   const { questionId } = useParams();
+  const navigate = useNavigate();
 
   const question = questions.find(
     (item) => item.id === questionId,
   );
+
+  const currentQuestionIndex = questions.findIndex(
+    (item) => item.id === questionId,
+  );
+
+  const previousQuestion =
+    currentQuestionIndex > 0
+      ? questions[currentQuestionIndex - 1]
+      : null;
+
+  const nextQuestion =
+    currentQuestionIndex >= 0 &&
+    currentQuestionIndex < questions.length - 1
+      ? questions[currentQuestionIndex + 1]
+      : null;
 
   const database = question?.database;
 
@@ -730,6 +749,46 @@ function QuestionPage() {
               </div>
             </section>
           </div>
+
+          <nav className="mt-6 flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <button
+              type="button"
+              onClick={() => {
+                if (previousQuestion) {
+                  navigate(
+                    `/question/${previousQuestion.id}`,
+                  );
+                }
+              }}
+              disabled={!previousQuestion}
+              className="flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
+            >
+              <ChevronLeft size={16} />
+              Previous Question
+            </button>
+
+            <span className="text-xs text-gray-500">
+              {currentQuestionIndex >= 0
+                ? `Question ${currentQuestionIndex + 1} of ${questions.length}`
+                : `Question 0 of ${questions.length}`}
+            </span>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (nextQuestion) {
+                  navigate(
+                    `/question/${nextQuestion.id}`,
+                  );
+                }
+              }}
+              disabled={!nextQuestion}
+              className="flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
+            >
+              Next Question
+              <ChevronRight size={16} />
+            </button>
+          </nav>
         </div>
       </main>
     </div>
