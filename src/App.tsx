@@ -10,6 +10,8 @@ import {
   Target,
 } from "lucide-react";
 
+import { questions } from "./data/questions";
+
 const navigation = [
   { label: "Home", icon: Home },
   { label: "Learn", icon: BookOpen },
@@ -25,6 +27,28 @@ const practiceItems = [
 ];
 
 function App() {
+  const totalQuestions = questions.length;
+  const solvedQuestions = questions.filter(
+    (question) => question.solved,
+  ).length;
+
+  const easyQuestions = questions.filter(
+    (question) => question.difficulty === "Easy",
+  ).length;
+
+  const mediumQuestions = questions.filter(
+    (question) => question.difficulty === "Medium",
+  ).length;
+
+  const hardQuestions = questions.filter(
+    (question) => question.difficulty === "Hard",
+  ).length;
+
+  const completionPercentage =
+    totalQuestions === 0
+      ? 0
+      : Math.round((solvedQuestions / totalQuestions) * 100);
+
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
       {/* Sidebar */}
@@ -40,6 +64,7 @@ function App() {
               <div className="text-[15px] font-semibold text-gray-900">
                 QueryVanta
               </div>
+
               <div className="text-[11px] text-gray-400">
                 Data Engineering Practice
               </div>
@@ -114,6 +139,7 @@ function App() {
               <h1 className="text-xl font-semibold text-gray-900">
                 Coding Problems
               </h1>
+
               <p className="mt-0.5 text-xs text-gray-500">
                 Practice SQL, PySpark and Data Engineering
               </p>
@@ -156,6 +182,7 @@ function App() {
                   className="flex min-w-[145px] items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-500 hover:bg-gray-50"
                 >
                   {filter}
+
                   <ChevronDown size={15} />
                 </button>
               ))}
@@ -172,111 +199,162 @@ function App() {
                     <h2 className="font-semibold text-gray-900">
                       Questions
                     </h2>
+
                     <p className="mt-1 text-xs text-gray-500">
                       Interactive Data Engineering problems
                     </p>
                   </div>
 
                   <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-600">
-                    0 Solved
+                    {solvedQuestions} Solved
                   </span>
                 </div>
               </div>
 
-              {/* Temporary question preview */}
-              <div className="p-5">
-                <div className="rounded-lg border border-gray-100 p-5 transition hover:border-gray-200 hover:shadow-sm">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-600">
-                          Easy
-                        </span>
+              {/* Questions */}
+              <div className="space-y-4 p-5">
+                {questions.map((question) => (
+                  <div
+                    key={question.id}
+                    className="rounded-lg border border-gray-100 p-5 transition hover:border-gray-200 hover:shadow-sm"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        {/* Difficulty + category */}
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`rounded-md px-2 py-1 text-xs font-medium ${
+                              question.difficulty === "Easy"
+                                ? "bg-emerald-50 text-emerald-600"
+                                : question.difficulty === "Medium"
+                                  ? "bg-amber-50 text-amber-600"
+                                  : "bg-red-50 text-red-500"
+                            }`}
+                          >
+                            {question.difficulty}
+                          </span>
 
-                        <span className="text-xs text-gray-400">
-                          Filtering
-                        </span>
+                          <span className="text-xs text-gray-400">
+                            {question.category}
+                          </span>
+                        </div>
+
+                        {/* Title */}
+                        <h3 className="mt-3 text-[15px] font-semibold text-gray-900">
+                          {question.title}
+                        </h3>
+
+                        {/* Description */}
+                        <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-500">
+                          {question.description}
+                        </p>
                       </div>
 
-                      <h3 className="mt-3 text-[15px] font-semibold text-gray-900">
-                        High-Engagement Video Filtering
-                      </h3>
-
-                      <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-500">
-                        Filter recent videos with more than 1 million views
-                        and sort them by duration.
-                      </p>
+                      {/* Bookmark */}
+                      <button className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700">
+                        <Star size={18} />
+                      </button>
                     </div>
 
-                    <button className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700">
-                      <Star size={18} />
-                    </button>
+                    {/* Tags */}
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {question.languages.map((language) => (
+                        <span
+                          key={language}
+                          className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500"
+                        >
+                          {language}
+                        </span>
+                      ))}
+
+                      {question.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <span className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500">
-                      PostgreSQL
-                    </span>
-
-                    <span className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500">
-                      WHERE
-                    </span>
-
-                    <span className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500">
-                      ORDER BY
-                    </span>
-                  </div>
-                </div>
+                ))}
               </div>
             </section>
 
             {/* Progress */}
             <aside className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-              <h2 className="font-semibold text-gray-900">Your Progress</h2>
+              <h2 className="font-semibold text-gray-900">
+                Your Progress
+              </h2>
 
+              {/* Progress circle */}
               <div className="mt-6 flex items-center justify-center">
                 <div className="flex h-40 w-40 items-center justify-center rounded-full border-[14px] border-gray-100">
                   <div className="text-center">
                     <div className="text-3xl font-semibold text-gray-900">
-                      0
+                      {solvedQuestions}
                     </div>
-                    <div className="text-xs text-gray-400">Solved</div>
+
+                    <div className="text-xs text-gray-400">
+                      Solved
+                    </div>
                   </div>
                 </div>
               </div>
 
+              {/* Difficulty counts */}
               <div className="mt-6 grid grid-cols-3 gap-2 text-center">
                 <div>
                   <div className="text-lg font-semibold text-emerald-500">
-                    0
+                    {easyQuestions}
                   </div>
-                  <div className="text-[11px] text-gray-400">Easy</div>
+
+                  <div className="text-[11px] text-gray-400">
+                    Easy
+                  </div>
                 </div>
 
                 <div>
                   <div className="text-lg font-semibold text-amber-500">
-                    0
+                    {mediumQuestions}
                   </div>
-                  <div className="text-[11px] text-gray-400">Medium</div>
+
+                  <div className="text-[11px] text-gray-400">
+                    Medium
+                  </div>
                 </div>
 
                 <div>
                   <div className="text-lg font-semibold text-red-400">
-                    0
+                    {hardQuestions}
                   </div>
-                  <div className="text-[11px] text-gray-400">Hard</div>
+
+                  <div className="text-[11px] text-gray-400">
+                    Hard
+                  </div>
                 </div>
               </div>
 
+              {/* Statistics */}
               <div className="mt-6 border-t border-gray-100 pt-5">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-500">Total Questions</span>
-                  <span className="font-medium text-gray-900">1</span>
+                  <span className="text-gray-500">
+                    Total Questions
+                  </span>
+
+                  <span className="font-medium text-gray-900">
+                    {totalQuestions}
+                  </span>
                 </div>
 
                 <div className="mt-3 flex items-center justify-between text-sm">
-                  <span className="text-gray-500">Completed</span>
-                  <span className="font-medium text-gray-900">0%</span>
+                  <span className="text-gray-500">
+                    Completed
+                  </span>
+
+                  <span className="font-medium text-gray-900">
+                    {completionPercentage}%
+                  </span>
                 </div>
               </div>
             </aside>
