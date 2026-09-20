@@ -4,6 +4,8 @@ import {
   BarChart3,
   BookOpen,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Code2,
   FolderKanban,
   Home,
@@ -40,6 +42,8 @@ const practiceItems = [
   { label: "Cloud Labs", icon: FolderKanban },
 ];
 
+const PAGE_SIZE = 10;
+
 function App() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDifficulty, setSelectedDifficulty] =
@@ -65,6 +69,20 @@ function App() {
 
   const [showBookmarkedOnly, setShowBookmarkedOnly] =
     useState(false);
+
+  const [currentPage, setCurrentPage] = useState(1);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    searchTerm,
+    selectedDifficulty,
+    selectedQuestionType,
+    selectedLanguage,
+    selectedCompany,
+    selectedStatus,
+    showBookmarkedOnly,
+  ]);
 
   useEffect(() => {
     const syncProgress = () => {
@@ -256,6 +274,23 @@ function App() {
   ]);
 
   const totalQuestions = questions.length;
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredQuestions.length / PAGE_SIZE),
+  );
+
+  const safeCurrentPage = Math.min(
+    Math.max(currentPage, 1),
+    totalPages,
+  );
+
+  const paginatedQuestions = filteredQuestions.slice(
+    (safeCurrentPage - 1) * PAGE_SIZE,
+    safeCurrentPage * PAGE_SIZE,
+  );
+
+  const showPagination = filteredQuestions.length > PAGE_SIZE;
 
   const solvedQuestions = questions.filter(
     (question) =>
@@ -539,23 +574,76 @@ function App() {
               {/* Questions */}
               <div className="space-y-4 p-5">
                 {filteredQuestions.length > 0 ? (
-                  filteredQuestions.map(
-                    (question) => (
-                      <QuestionCard
-                        key={question.id}
-                        question={question}
-                        isSolved={solvedQuestionIds.has(
-                          question.id,
-                        )}
-                        isBookmarked={bookmarkedQuestionIds.has(
-                          question.id,
-                        )}
-                        onToggleBookmark={
-                          handleToggleBookmark
-                        }
-                      />
-                    ),
-                  )
+                  <>
+                    {paginatedQuestions.map(
+                      (question) => (
+                        <QuestionCard
+                          key={question.id}
+                          question={question}
+                          isSolved={solvedQuestionIds.has(
+                            question.id,
+                          )}
+                          isBookmarked={bookmarkedQuestionIds.has(
+                            question.id,
+                          )}
+                          onToggleBookmark={
+                            handleToggleBookmark
+                          }
+                        />
+                      ),
+                    )}
+
+                    {showPagination && (
+                      <div className="flex items-center justify-between border-t border-gray-100 pt-4">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCurrentPage(
+                              (previous) =>
+                                Math.max(
+                                  previous - 1,
+                                  1,
+                                ),
+                            )
+                          }
+                          disabled={
+                            safeCurrentPage <= 1
+                          }
+                          className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
+                        >
+                          <ChevronLeft size={16} />
+                          Previous
+                        </button>
+
+                        <span className="text-xs text-gray-500">
+                          Page{" "}
+                          {safeCurrentPage} of{" "}
+                          {totalPages}
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCurrentPage(
+                              (previous) =>
+                                Math.min(
+                                  previous + 1,
+                                  totalPages,
+                                ),
+                            )
+                          }
+                          disabled={
+                            safeCurrentPage >=
+                            totalPages
+                          }
+                          className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
+                        >
+                          Next
+                          <ChevronRight size={16} />
+                        </button>
+                      </div>
+                    )}
+                  </>
                 ) : showBookmarkedOnly ? (
                   <div className="rounded-lg border border-dashed border-gray-200 px-6 py-12 text-center">
                     <Star
