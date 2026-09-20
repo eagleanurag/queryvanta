@@ -124,6 +124,42 @@ export function updateAdminQuestion(
   return adminQuestions;
 }
 
+function generateAdminQuestionId(): string {
+  const randomSuffix = Math.random()
+    .toString(36)
+    .slice(2, 8);
+
+  return `admin-${Date.now()}-${randomSuffix}`;
+}
+
+export function duplicateAdminQuestion(
+  questionId: string,
+): Question | null {
+  const adminQuestions = readAdminQuestions();
+
+  const source = adminQuestions.find(
+    (item) => item.id === questionId,
+  );
+
+  if (!source) {
+    return null;
+  }
+
+  const copy: Question = JSON.parse(
+    JSON.stringify(source),
+  );
+
+  copy.id = generateAdminQuestionId();
+  copy.title = `${source.title} (Copy)`;
+  copy.solved = false;
+
+  adminQuestions.push(copy);
+
+  writeAdminQuestions(adminQuestions);
+
+  return copy;
+}
+
 export function deleteAdminQuestion(
   questionId: string,
 ): Question[] {  const adminQuestions = readAdminQuestions().filter(

@@ -4,6 +4,7 @@ import type { ChangeEvent } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
+  Copy,
   Download,
   Eye,
   Pencil,
@@ -30,6 +31,7 @@ import type {
 import {
   clearAdminQuestions,
   deleteAdminQuestion,
+  duplicateAdminQuestion,
   getAdminQuestions,
   importAdminQuestions,
   saveAdminQuestion,
@@ -635,6 +637,24 @@ function AdminPage() {
       setErrors([]);
       resetForm();
     }
+  };
+
+  const handleDuplicate = (questionId: string) => {
+    const copy = duplicateAdminQuestion(questionId);
+
+    if (!copy) {
+      setErrors([
+        "Duplicate failed: question not found.",
+      ]);
+      return;
+    }
+
+    setAdminQuestions(getAdminQuestions());
+    setErrors([]);
+    setSuccessMessage(
+      `Question "${copy.title}" duplicated successfully.`,
+    );
+    setCreatedQuestionId(copy.id);
   };
 
   const handleClearAll = () => {
@@ -1376,6 +1396,17 @@ function AdminPage() {
                       >
                         <Pencil size={13} />
                         Edit
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDuplicate(item.id)
+                        }
+                        className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+                      >
+                        <Copy size={13} />
+                        Duplicate
                       </button>
 
                       <button
