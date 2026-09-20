@@ -33,6 +33,13 @@ export type QuestionDatabase = {
   tables: TableDefinition[];
 };
 
+export type ValidationType = "result";
+
+export type QuestionValidation = {
+  type: ValidationType;
+  expectedResult: Record<string, unknown>[];
+};
+
 export type Question = {
   id: string;
   title: string;
@@ -48,6 +55,8 @@ export type Question = {
   database?: QuestionDatabase;
 
   starterCode?: string;
+
+  validation?: QuestionValidation;
 };
 
 export const questions: Question[] = [
@@ -149,6 +158,41 @@ ORDER BY duration_seconds;`,
               published_date: "2026-03-22",
             },
           ],
+        },
+      ],
+    },
+
+    validation: {
+      type: "result",
+
+      expectedResult: [
+        {
+          video_id: 4,
+          title: "PostgreSQL Performance Tips",
+          views: 1800000,
+          duration_seconds: 540,
+          published_date: "2026-03-02",
+        },
+        {
+          video_id: 1,
+          title: "Data Engineering with Spark",
+          views: 2500000,
+          duration_seconds: 840,
+          published_date: "2026-01-15",
+        },
+        {
+          video_id: 6,
+          title: "Advanced ETL Architecture",
+          views: 3100000,
+          duration_seconds: 960,
+          published_date: "2026-03-22",
+        },
+        {
+          video_id: 3,
+          title: "Building Lakehouse Pipelines",
+          views: 4200000,
+          duration_seconds: 1260,
+          published_date: "2026-02-18",
         },
       ],
     },

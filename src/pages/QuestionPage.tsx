@@ -23,6 +23,7 @@ import type { PGlite } from "@electric-sql/pglite";
 
 import { questions } from "../data/questions";
 import { createQuestionDatabase } from "../lib/pglite";
+import { validateResult } from "../lib/validation";
 
 type ExecutionStatus =
   | "idle"
@@ -40,45 +41,48 @@ function QuestionPage() {
   const database = question?.database;
 
   const [sql, setSql] = useState(
-    question?.starterCode ?? "-- Write your solution here",
+    question?.starterCode ??
+      "-- Write your solution here",
   );
 
-  const [rows, setRows] = useState<Record<string, unknown>[]>(
-    [],
-  );
+  const [rows, setRows] = useState<
+    Record<string, unknown>[]
+  >([]);
 
   const [error, setError] = useState("");
 
   const [executionStatus, setExecutionStatus] =
     useState<ExecutionStatus>("idle");
 
-  const [executionTime, setExecutionTime] = useState<
-    number | null
-  >(null);
+  const [executionTime, setExecutionTime] =
+    useState<number | null>(null);
 
   const [isDatabaseReady, setIsDatabaseReady] =
     useState(false);
 
-  const databaseRef = useRef<PGlite | null>(null);
+  const [validationMessage, setValidationMessage] =
+    useState("");
 
-  /*
-   * Load starter SQL whenever the question changes.
-   */
+  const [isCorrect, setIsCorrect] =
+    useState<boolean | null>(null);
+
+  const databaseRef =
+    useRef<PGlite | null>(null);
+
   useEffect(() => {
     setSql(
-      question?.starterCode ?? "-- Write your solution here",
+      question?.starterCode ??
+        "-- Write your solution here",
     );
 
     setRows([]);
     setError("");
     setExecutionStatus("idle");
     setExecutionTime(null);
+    setValidationMessage("");
+    setIsCorrect(null);
   }, [question?.id, question?.starterCode]);
 
-  /*
-   * Create a fresh temporary PGlite database
-   * whenever a question is opened.
-   */
   useEffect(() => {
     let cancelled = false;
 
@@ -88,13 +92,16 @@ function QuestionPage() {
       setError("");
       setExecutionStatus("idle");
       setExecutionTime(null);
+      setValidationMessage("");
+      setIsCorrect(null);
 
       if (!database) {
         return;
       }
 
       try {
-        const db = await createQuestionDatabase(database);
+        const db =
+          await createQuestionDatabase(database);
 
         if (cancelled) {
           await db.close();
@@ -137,10 +144,15 @@ function QuestionPage() {
     };
   }, [question?.id, database]);
 
-  /*
-   * Execute SQL.
-   */
   const runQuery = async () => {
+    const currentQuestion = question;
+
+    if (!currentQuestion) {
+      setError("Question not found.");
+      setExecutionStatus("error");
+      return;
+    }
+
     const db = databaseRef.current;
 
     if (!db) {
@@ -159,6 +171,8 @@ function QuestionPage() {
     setError("");
     setRows([]);
     setExecutionTime(null);
+    setValidationMessage("");
+    setIsCorrect(null);
 
     const startTime = performance.now();
 
@@ -174,6 +188,21 @@ function QuestionPage() {
       setRows(result.rows);
       setExecutionTime(elapsed);
       setExecutionStatus("success");
+
+      if (
+        currentQuestion.validation?.type ===
+        "result"
+      ) {
+        const validation = validateResult(
+          result.rows,
+          currentQuestion.validation.expectedResult,
+        );
+
+        setIsCorrect(validation.correct);
+        setValidationMessage(
+          validation.message,
+        );
+      }
     } catch (err) {
       const elapsed =
         performance.now() - startTime;
@@ -186,12 +215,11 @@ function QuestionPage() {
       setError(message);
       setExecutionTime(elapsed);
       setExecutionStatus("error");
+      setValidationMessage("");
+      setIsCorrect(null);
     }
   };
 
-  /*
-   * Reset editor and execution state.
-   */
   const resetQuery = () => {
     setSql(
       question?.starterCode ??
@@ -202,6 +230,8 @@ function QuestionPage() {
     setError("");
     setExecutionStatus("idle");
     setExecutionTime(null);
+    setValidationMessage("");
+    setIsCorrect(null);
   };
 
   if (!question) {
@@ -230,7 +260,6 @@ function QuestionPage() {
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
-      {/* Header */}
       <header className="border-b border-gray-200 bg-white">
         <div className="flex h-[72px] items-center px-8">
           <Link
@@ -249,10 +278,8 @@ function QuestionPage() {
         </div>
       </header>
 
-      {/* Main */}
       <main className="p-8">
         <div className="mx-auto max-w-[1400px]">
-          {/* Question information */}
           <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-center gap-2">
               <span
@@ -314,9 +341,7 @@ function QuestionPage() {
             </div>
           </section>
 
-          {/* Practice workspace */}
           <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
-            {/* Problem */}
             <section className="rounded-xl border border-gray-200 bg-white shadow-sm">
               <div className="border-b border-gray-100 px-5 py-4">
                 <h2 className="font-semibold text-gray-900">
@@ -333,7 +358,6 @@ function QuestionPage() {
                   {question.description}
                 </p>
 
-                {/* Database */}
                 {database && (
                   <div className="mt-7">
                     <div className="flex items-center justify-between">
@@ -360,7 +384,6 @@ function QuestionPage() {
                       </div>
                     </div>
 
-                    {/* Tables */}
                     <div className="mt-4 space-y-4">
                       {database.tables.map((table) => (
                         <div
@@ -409,7 +432,6 @@ function QuestionPage() {
               </div>
             </section>
 
-            {/* SQL Editor */}
             <section className="rounded-xl border border-gray-200 bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
                 <div>
@@ -423,7 +445,6 @@ function QuestionPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {/* Reset */}
                   <button
                     type="button"
                     onClick={resetQuery}
@@ -436,7 +457,6 @@ function QuestionPage() {
                     Reset
                   </button>
 
-                  {/* Run */}
                   <button
                     type="button"
                     onClick={runQuery}
@@ -467,7 +487,6 @@ function QuestionPage() {
               </div>
 
               <div className="p-5">
-                {/* Editor */}
                 <textarea
                   value={sql}
                   onChange={(event) =>
@@ -477,39 +496,78 @@ function QuestionPage() {
                   className="min-h-[360px] w-full resize-y rounded-lg border border-gray-200 bg-gray-950 p-4 font-mono text-sm leading-6 text-gray-100 outline-none focus:border-gray-400"
                 />
 
-                {/* Execution status */}
                 {executionStatus === "success" && (
-                  <div className="mt-4 flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2
-                        size={16}
-                        className="text-emerald-600"
-                      />
+                  <div
+                    className={`mt-4 rounded-lg border px-4 py-3 ${
+                      isCorrect
+                        ? "border-emerald-200 bg-emerald-50"
+                        : "border-amber-200 bg-amber-50"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {isCorrect ? (
+                          <CheckCircle2
+                            size={16}
+                            className="text-emerald-600"
+                          />
+                        ) : (
+                          <XCircle
+                            size={16}
+                            className="text-amber-600"
+                          />
+                        )}
 
-                      <span className="text-xs font-medium text-emerald-700">
-                        Query executed successfully
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-3 text-xs text-emerald-600">
-                      <span>
-                        {rows.length}{" "}
-                        {rows.length === 1
-                          ? "row"
-                          : "rows"}
-                      </span>
-
-                      {executionTime !== null && (
-                        <span className="flex items-center gap-1">
-                          <Clock3 size={12} />
-                          {executionTime.toFixed(2)} ms
+                        <span
+                          className={`text-xs font-semibold ${
+                            isCorrect
+                              ? "text-emerald-700"
+                              : "text-amber-700"
+                          }`}
+                        >
+                          {isCorrect
+                            ? "Correct answer!"
+                            : "Query executed, but answer is incorrect"}
                         </span>
-                      )}
+                      </div>
+
+                      <div
+                        className={`flex items-center gap-3 text-xs ${
+                          isCorrect
+                            ? "text-emerald-600"
+                            : "text-amber-600"
+                        }`}
+                      >
+                        <span>
+                          {rows.length}{" "}
+                          {rows.length === 1
+                            ? "row"
+                            : "rows"}
+                        </span>
+
+                        {executionTime !== null && (
+                          <span className="flex items-center gap-1">
+                            <Clock3 size={12} />
+                            {executionTime.toFixed(2)} ms
+                          </span>
+                        )}
+                      </div>
                     </div>
+
+                    {validationMessage && (
+                      <p
+                        className={`mt-2 text-xs ${
+                          isCorrect
+                            ? "text-emerald-600"
+                            : "text-amber-600"
+                        }`}
+                      >
+                        {validationMessage}
+                      </p>
+                    )}
                   </div>
                 )}
 
-                {/* Error */}
                 {executionStatus === "error" && (
                   <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4">
                     <div className="flex items-center gap-2">
@@ -535,7 +593,6 @@ function QuestionPage() {
                   </div>
                 )}
 
-                {/* Results */}
                 <div className="mt-5">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-gray-900">
@@ -596,8 +653,7 @@ function QuestionPage() {
                     executionStatus !== "error" && (
                       <div className="mt-3 flex min-h-[120px] items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50">
                         <p className="text-xs text-gray-400">
-                          {executionStatus ===
-                          "running"
+                          {executionStatus === "running"
                             ? "Executing query..."
                             : "Run your query to see results."}
                         </p>
