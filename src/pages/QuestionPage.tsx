@@ -161,6 +161,10 @@ function QuestionPage() {
   }, [question?.id, database]);
 
   const runQuery = async () => {
+    if (executionStatus === "running") {
+      return;
+    }
+
     const currentQuestion = question;
 
     if (!currentQuestion) {
@@ -247,10 +251,7 @@ function QuestionPage() {
   };
 
   const resetQuery = () => {
-    setSql(
-      question?.starterCode ??
-        "-- Write your solution here",
-    );
+    setSql(question?.starterCode ?? "");
 
     setRows([]);
     setError("");
@@ -481,8 +482,11 @@ function QuestionPage() {
             <section className="rounded-xl border border-gray-200 bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
                 <div>
-                  <h2 className="font-semibold text-gray-900">
+                  <h2 className="flex items-center gap-2 font-semibold text-gray-900">
                     SQL Editor
+                    <span className="rounded-md bg-gray-100 px-2 py-0.5 font-mono text-xs font-medium text-gray-600">
+                      SQL
+                    </span>
                   </h2>
 
                   <p className="mt-1 text-xs text-gray-400">
@@ -490,19 +494,22 @@ function QuestionPage() {
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={resetQuery}
-                    disabled={
-                      executionStatus === "running"
-                    }
-                    className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <RotateCcw size={14} />
-                    Reset
-                  </button>
+                <span className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500">
+                  PostgreSQL
+                </span>
+              </div>
 
+              <div className="p-5">
+                <textarea
+                  value={sql}
+                  onChange={(event) =>
+                    setSql(event.target.value)
+                  }
+                  spellCheck={false}
+                  className="min-h-[360px] w-full resize-y rounded-lg border border-gray-200 bg-gray-950 p-4 font-mono text-sm leading-6 text-gray-100 outline-none focus:border-gray-400"
+                />
+
+                <div className="mt-4 flex items-center gap-2">
                   <button
                     type="button"
                     onClick={runQuery}
@@ -510,7 +517,7 @@ function QuestionPage() {
                       !isDatabaseReady ||
                       executionStatus === "running"
                     }
-                    className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-white transition ${
+                    className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-medium text-white transition ${
                       executionStatus === "running"
                         ? "cursor-wait bg-gray-600"
                         : "bg-gray-900 hover:bg-gray-800"
@@ -527,20 +534,21 @@ function QuestionPage() {
 
                     {executionStatus === "running"
                       ? "Running..."
-                      : "Run"}
+                      : "Run Query"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={resetQuery}
+                    disabled={
+                      executionStatus === "running"
+                    }
+                    className="flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-xs text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <RotateCcw size={14} />
+                    Reset Code
                   </button>
                 </div>
-              </div>
-
-              <div className="p-5">
-                <textarea
-                  value={sql}
-                  onChange={(event) =>
-                    setSql(event.target.value)
-                  }
-                  spellCheck={false}
-                  className="min-h-[360px] w-full resize-y rounded-lg border border-gray-200 bg-gray-950 p-4 font-mono text-sm leading-6 text-gray-100 outline-none focus:border-gray-400"
-                />
 
                 {executionStatus === "success" && (
                   <div
@@ -645,10 +653,19 @@ function QuestionPage() {
                       Results
                     </h3>
 
-                    {rows.length > 0 && (
+                    {executionStatus === "success" ? (
                       <span className="text-xs text-gray-400">
-                        {rows.length} rows
+                        {rows.length}{" "}
+                        {rows.length === 1
+                          ? "row"
+                          : "rows"}
                       </span>
+                    ) : (
+                      rows.length > 0 && (
+                        <span className="text-xs text-gray-400">
+                          {rows.length} rows
+                        </span>
+                      )
                     )}
                   </div>
 
@@ -697,11 +714,14 @@ function QuestionPage() {
                     </div>
                   ) : (
                     executionStatus !== "error" && (
-                      <div className="mt-3 flex min-h-[120px] items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50">
+                      <div className="mt-3 flex min-h-[120px] items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 text-center">
                         <p className="text-xs text-gray-400">
                           {executionStatus === "running"
                             ? "Executing query..."
-                            : "Run your query to see results."}
+                            : executionStatus ===
+                                "success"
+                              ? "Query executed successfully. 0 rows returned."
+                              : "Run your query to see results."}
                         </p>
                       </div>
                     )
