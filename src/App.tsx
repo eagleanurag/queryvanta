@@ -16,6 +16,11 @@ import {
 } from "lucide-react";
 
 import { questions } from "./data/questions";
+import type { Question } from "./data/questions";
+import {
+  ADMIN_QUESTIONS_EVENT,
+  getAdminQuestions,
+} from "./lib/adminQuestions";
 import {
   getSolvedQuestionIds,
   PROGRESS_EVENT,
@@ -69,6 +74,43 @@ function App() {
 
   const [showBookmarkedOnly, setShowBookmarkedOnly] =
     useState(false);
+
+  const [adminQuestions, setAdminQuestions] = useState<
+    Question[]
+  >(() => getAdminQuestions());
+
+  useEffect(() => {
+    const syncAdminQuestions = () => {
+      setAdminQuestions(getAdminQuestions());
+    };
+
+    window.addEventListener(
+      ADMIN_QUESTIONS_EVENT,
+      syncAdminQuestions,
+    );
+
+    window.addEventListener(
+      "storage",
+      syncAdminQuestions,
+    );
+
+    return () => {
+      window.removeEventListener(
+        ADMIN_QUESTIONS_EVENT,
+        syncAdminQuestions,
+      );
+
+      window.removeEventListener(
+        "storage",
+        syncAdminQuestions,
+      );
+    };
+  }, []);
+
+  const allQuestions = useMemo(
+    () => [...questions, ...adminQuestions],
+    [adminQuestions],
+  );
 
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -155,7 +197,7 @@ function App() {
     "All",
     ...Array.from(
       new Set(
-        questions.map(
+        allQuestions.map(
           (question) => question.difficulty,
         ),
       ),
@@ -166,7 +208,7 @@ function App() {
     "All",
     ...Array.from(
       new Set(
-        questions.map(
+        allQuestions.map(
           (question) => question.questionType,
         ),
       ),
@@ -177,7 +219,7 @@ function App() {
     "All",
     ...Array.from(
       new Set(
-        questions.flatMap(
+        allQuestions.flatMap(
           (question) => question.languages,
         ),
       ),
@@ -188,7 +230,7 @@ function App() {
     "All",
     ...Array.from(
       new Set(
-        questions.flatMap(
+        allQuestions.flatMap(
           (question) => question.companies,
         ),
       ),
@@ -201,7 +243,7 @@ function App() {
     const normalizedSearch =
       searchTerm.trim().toLowerCase();
 
-    return questions.filter((question) => {
+    return allQuestions.filter((question) => {
       const matchesBookmark =
         !showBookmarkedOnly ||
         bookmarkedQuestionIds.has(question.id);
@@ -262,6 +304,7 @@ function App() {
       );
     });
   }, [
+    allQuestions,
     searchTerm,
     selectedDifficulty,
     selectedQuestionType,
@@ -273,7 +316,7 @@ function App() {
     bookmarkedQuestionIds,
   ]);
 
-  const totalQuestions = questions.length;
+  const totalQuestions = allQuestions.length;
 
   const totalPages = Math.max(
     1,
@@ -292,22 +335,22 @@ function App() {
 
   const showPagination = filteredQuestions.length > PAGE_SIZE;
 
-  const solvedQuestions = questions.filter(
+  const solvedQuestions = allQuestions.filter(
     (question) =>
       solvedQuestionIds.has(question.id),
   ).length;
 
-  const easyQuestions = questions.filter(
+  const easyQuestions = allQuestions.filter(
     (question) =>
       question.difficulty === "Easy",
   ).length;
 
-  const mediumQuestions = questions.filter(
+  const mediumQuestions = allQuestions.filter(
     (question) =>
       question.difficulty === "Medium",
   ).length;
 
-  const hardQuestions = questions.filter(
+  const hardQuestions = allQuestions.filter(
     (question) =>
       question.difficulty === "Hard",
   ).length;

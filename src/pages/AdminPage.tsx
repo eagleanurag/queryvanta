@@ -1,0 +1,1024 @@
+import { useState } from "react";
+
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Plus,
+  Table2,
+  Trash2,
+  X,
+  XCircle,
+} from "lucide-react";
+
+import { Link } from "react-router-dom";
+
+import type {
+  ColumnType,
+  Difficulty,
+  Question,
+} from "../data/questions";
+
+import {
+  clearAdminQuestions,
+  deleteAdminQuestion,
+  getAdminQuestions,
+  saveAdminQuestion,
+} from "../lib/adminQuestions";
+
+const COLUMN_TYPES: ColumnType[] = [
+  "INTEGER",
+  "BIGINT",
+  "DECIMAL",
+  "TEXT",
+  "BOOLEAN",
+  "DATE",
+  "TIMESTAMP",
+];
+
+const DIFFICULTIES: Difficulty[] = [
+  "Easy",
+  "Medium",
+  "Hard",
+];
+
+type ColumnDraft = {
+  name: string;
+  type: ColumnType;
+};
+
+type TableDraft = {
+  name: string;
+  columns: ColumnDraft[];
+  sampleRowsText: string;
+};
+
+function createEmptyTable(): TableDraft {
+  return {
+    name: "",
+    columns: [{ name: "", type: "TEXT" }],
+    sampleRowsText: "[]",
+  };
+}
+
+function parseCsv(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item !== "");
+}
+
+function generateQuestionId(): string {
+  const randomSuffix = Math.random()
+    .toString(36)
+    .slice(2, 8);
+
+  return `admin-${Date.now()}-${randomSuffix}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+}
+
+const inputClassName =
+  "w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none placeholder:text-gray-400 focus:border-gray-400";
+
+const labelClassName =
+  "mb-1.5 block text-sm font-medium text-gray-700";
+
+function AdminPage() {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [difficulty, setDifficulty] =
+    useState<Difficulty>("Easy");
+  const [category, setCategory] = useState("");
+  const [companiesText, setCompaniesText] = useState("");
+  const [languagesText, setLanguagesText] = useState("");
+  const [tagsText, setTagsText] = useState("");
+  const [starterSql, setStarterSql] = useState("");
+  const [expectedResultText, setExpectedResultText] =
+    useState("[]");
+  const [tables, setTables] = useState<TableDraft[]>([
+    createEmptyTable(),
+  ]);
+
+  const [errors, setErrors] = useState<string[]>([]);
+  const [successMessage, setSuccessMessage] = useState("");
+  const [createdQuestionId, setCreatedQuestionId] =
+    useState("");
+
+  const [adminQuestions, setAdminQuestions] = useState<
+    Question[]
+  >(() => getAdminQuestions());
+
+  const [confirmClearAll, setConfirmClearAll] =
+    useState(false);
+
+  const updateTable = (
+    tableIndex: number,
+    update: Partial<TableDraft>,
+  ) => {
+    setTables((previous) =>
+      previous.map((table, index) =>
+        index === tableIndex
+          ? { ...table, ...update }
+          : table,
+      ),
+    );
+  };
+
+  const updateColumn = (
+    tableIndex: number,
+    columnIndex: number,
+    update: Partial<ColumnDraft>,
+  ) => {
+    setTables((previous) =>
+      previous.map((table, index) => {
+        if (index !== tableIndex) {
+          return table;
+        }
+
+        return {
+          ...table,
+          columns: table.columns.map(
+            (column, columnPosition) =>
+              columnPosition === columnIndex
+                ? { ...column, ...update }
+                : column,
+          ),
+        };
+      }),
+    );
+  };
+
+  const addTable = () => {
+    setTables((previous) => [
+      ...previous,
+      createEmptyTable(),
+    ]);
+  };
+
+  const removeTable = (tableIndex: number) => {
+    setTables((previous) =>
+      previous.filter(
+        (_, index) => index !== tableIndex,
+      ),
+    );
+  };
+
+  const addColumn = (tableIndex: number) => {
+    setTables((previous) =>
+      previous.map((table, index) =>
+        index === tableIndex
+          ? {
+              ...table,
+              columns: [
+                ...table.columns,
+                { name: "", type: "TEXT" as ColumnType },
+              ],
+            }
+          : table,
+      ),
+    );
+  };
+
+  const removeColumn = (
+    tableIndex: number,
+    columnIndex: number,
+  ) => {
+    setTables((previous) =>
+      previous.map((table, index) => {
+        if (index !== tableIndex) {
+          return table;
+        }
+
+        return {
+          ...table,
+          columns: table.columns.filter(
+            (_, columnPosition) =>
+              columnPosition !== columnIndex,
+          ),
+        };
+      }),
+    );
+  };
+
+  const resetForm = () => {
+    setTitle("");
+    setDescription("");
+    setDifficulty("Easy");
+    setCategory("");
+    setCompaniesText("");
+    setLanguagesText("");
+    setTagsText("");
+    setStarterSql("");
+    setExpectedResultText("[]");
+    setTables([createEmptyTable()]);
+  };
+
+  const handleCreate = () => {
+    const validationErrors: string[] = [];
+
+    if (title.trim() === "") {
+      validationErrors.push("Title is required.");
+    }
+
+    if (description.trim() === "") {
+      validationErrors.push("Description is required.");
+    }
+
+    if (category.trim() === "") {
+      validationErrors.push("Category is required.");
+    }
+
+    if (starterSql.trim() === "") {
+      validationErrors.push("Starter SQL is required.");
+    }
+
+    if (tables.length === 0) {
+      validationErrors.push(
+        "At least one table is required.",
+      );
+    }
+
+    const seenTableNames = new Set<string>();
+
+    tables.forEach((table, tableIndex) => {
+      const tableLabel = `Table ${tableIndex + 1}`;
+      const tableName = table.name.trim();
+
+      if (tableName === "") {
+        validationErrors.push(
+          `${tableLabel}: table name is required.`,
+        );
+      } else {
+        const normalized = tableName.toLowerCase();
+
+        if (seenTableNames.has(normalized)) {
+          validationErrors.push(
+            `${tableLabel}: duplicate table name "${tableName}".`,
+          );
+        } else {
+          seenTableNames.add(normalized);
+        }
+      }
+
+      if (table.columns.length === 0) {
+        validationErrors.push(
+          `${tableLabel}: at least one column is required.`,
+        );
+      }
+
+      const seenColumnNames = new Set<string>();
+
+      table.columns.forEach((column, columnIndex) => {
+        const columnName = column.name.trim();
+
+        if (columnName === "") {
+          validationErrors.push(
+            `${tableLabel}, column ${columnIndex + 1}: column name is required.`,
+          );
+        } else {
+          const normalized =
+            columnName.toLowerCase();
+
+          if (seenColumnNames.has(normalized)) {
+            validationErrors.push(
+              `${tableLabel}: duplicate column name "${columnName}".`,
+            );
+          } else {
+            seenColumnNames.add(normalized);
+          }
+        }
+
+        if (!COLUMN_TYPES.includes(column.type)) {
+          validationErrors.push(
+            `${tableLabel}: unsupported column type "${column.type}".`,
+          );
+        }
+      });
+    });
+
+    let expectedResult: Record<string, unknown>[] = [];
+
+    try {
+      const parsedExpected: unknown = JSON.parse(
+        expectedResultText.trim() === ""
+          ? "[]"
+          : expectedResultText,
+      );
+
+      if (!Array.isArray(parsedExpected)) {
+        validationErrors.push(
+          "Expected Result must be a JSON array.",
+        );
+      } else if (
+        !parsedExpected.every(isRecord)
+      ) {
+        validationErrors.push(
+          "Expected Result rows must be JSON objects.",
+        );
+      } else {
+        expectedResult = parsedExpected;
+      }
+    } catch {
+      validationErrors.push(
+        "Expected Result must be valid JSON.",
+      );
+    }
+
+    const tableRows: Record<string, unknown>[][] = [];
+
+    tables.forEach((table, tableIndex) => {
+      const tableLabel =
+        table.name.trim() === ""
+          ? `Table ${tableIndex + 1}`
+          : `Table "${table.name.trim()}"`;
+
+      try {
+        const parsedRows: unknown = JSON.parse(
+          table.sampleRowsText.trim() === ""
+            ? "[]"
+            : table.sampleRowsText,
+        );
+
+        if (!Array.isArray(parsedRows)) {
+          validationErrors.push(
+            `${tableLabel}: sample rows must be a JSON array.`,
+          );
+          tableRows.push([]);
+        } else if (!parsedRows.every(isRecord)) {
+          validationErrors.push(
+            `${tableLabel}: sample rows must be JSON objects.`,
+          );
+          tableRows.push([]);
+        } else {
+          tableRows.push(parsedRows);
+        }
+      } catch {
+        validationErrors.push(
+          `${tableLabel}: sample rows must be valid JSON.`,
+        );
+        tableRows.push([]);
+      }
+    });
+
+    if (validationErrors.length > 0) {
+      setErrors(validationErrors);
+      setSuccessMessage("");
+      setCreatedQuestionId("");
+      return;
+    }
+
+    const languages = parseCsv(languagesText);
+
+    const question: Question = {
+      id: generateQuestionId(),
+      title: title.trim(),
+      description: description.trim(),
+      difficulty,
+      questionType: "SQL",
+      category: category.trim(),
+      languages:
+        languages.length > 0
+          ? languages
+          : ["PostgreSQL"],
+      tags: parseCsv(tagsText),
+      companies: parseCsv(companiesText),
+      solved: false,
+      database: {
+        engine: "PostgreSQL",
+        tables: tables.map((table, tableIndex) => ({
+          name: table.name.trim(),
+          columns: table.columns.map((column) => ({
+            name: column.name.trim(),
+            type: column.type,
+          })),
+          rows: tableRows[tableIndex] ?? [],
+        })),
+      },
+      starterCode: starterSql,
+      validation: {
+        type: "result",
+        orderMatters: false,
+        expectedResult,
+      },
+    };
+
+    const updated = saveAdminQuestion(question);
+
+    setAdminQuestions(updated);
+    setErrors([]);
+    setSuccessMessage(
+      `Question "${question.title}" created successfully.`,
+    );
+    setCreatedQuestionId(question.id);
+    resetForm();
+  };
+
+  const handleDelete = (questionId: string) => {
+    setAdminQuestions(deleteAdminQuestion(questionId));
+    setConfirmClearAll(false);
+  };
+
+  const handleClearAll = () => {
+    if (!confirmClearAll) {
+      setConfirmClearAll(true);
+      return;
+    }
+
+    setAdminQuestions(clearAdminQuestions());
+    setConfirmClearAll(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+      <header className="border-b border-gray-200 bg-white">
+        <div className="flex h-[72px] items-center px-8">
+          <Link
+            to="/"
+            className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900"
+          >
+            <ArrowLeft size={17} />
+            Back to Questions
+          </Link>
+
+          <div className="mx-4 h-5 w-px bg-gray-200" />
+
+          <span className="rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white">
+            Admin
+          </span>
+        </div>
+      </header>
+
+      <main className="p-8">
+        <div className="mx-auto max-w-[1000px]">
+          <h1 className="text-2xl font-semibold text-gray-900">
+            Question Builder
+          </h1>
+
+          <p className="mt-1 text-sm text-gray-500">
+            Create and save SQL practice questions
+            locally.
+          </p>
+
+          {errors.length > 0 && (
+            <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-5">
+              <div className="flex items-center gap-2">
+                <XCircle
+                  size={16}
+                  className="text-red-600"
+                />
+
+                <h2 className="text-sm font-semibold text-red-700">
+                  Please fix the following errors
+                </h2>
+              </div>
+
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-red-600">
+                {errors.map((error) => (
+                  <li key={error}>{error}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {successMessage !== "" && (
+            <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 p-5">
+              <div className="flex items-center gap-2">
+                <CheckCircle2
+                  size={16}
+                  className="text-emerald-600"
+                />
+
+                <p className="text-sm font-medium text-emerald-700">
+                  {successMessage}
+                </p>
+              </div>
+
+              {createdQuestionId !== "" && (
+                <p className="mt-2 text-xs text-emerald-600">
+                  ID:{" "}
+                  <span className="font-mono">
+                    {createdQuestionId}
+                  </span>{" "}
+                  ·{" "}
+                  <Link
+                    to={`/question/${createdQuestionId}`}
+                    className="font-medium underline hover:text-emerald-700"
+                  >
+                    Open question
+                  </Link>
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Basic information */}
+          <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+            <h2 className="font-semibold text-gray-900">
+              Basic information
+            </h2>
+
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <label
+                  htmlFor="admin-title"
+                  className={labelClassName}
+                >
+                  Title
+                </label>
+
+                <input
+                  id="admin-title"
+                  type="text"
+                  value={title}
+                  onChange={(event) =>
+                    setTitle(event.target.value)
+                  }
+                  placeholder="Customer Order Analysis"
+                  className={inputClassName}
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label
+                  htmlFor="admin-description"
+                  className={labelClassName}
+                >
+                  Description
+                </label>
+
+                <textarea
+                  id="admin-description"
+                  value={description}
+                  onChange={(event) =>
+                    setDescription(event.target.value)
+                  }
+                  placeholder="Describe what the learner should do."
+                  rows={3}
+                  className={`${inputClassName} resize-y`}
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="admin-difficulty"
+                  className={labelClassName}
+                >
+                  Difficulty
+                </label>
+
+                <select
+                  id="admin-difficulty"
+                  value={difficulty}
+                  onChange={(event) =>
+                    setDifficulty(
+                      event.target.value as Difficulty,
+                    )
+                  }
+                  className={`${inputClassName} cursor-pointer`}
+                >
+                  {DIFFICULTIES.map((option) => (
+                    <option
+                      key={option}
+                      value={option}
+                    >
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="admin-question-type"
+                  className={labelClassName}
+                >
+                  Question Type
+                </label>
+
+                <select
+                  id="admin-question-type"
+                  value="SQL"
+                  disabled
+                  className={`${inputClassName} cursor-not-allowed bg-gray-50`}
+                >
+                  <option value="SQL">SQL</option>
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="admin-category"
+                  className={labelClassName}
+                >
+                  Category
+                </label>
+
+                <input
+                  id="admin-category"
+                  type="text"
+                  value={category}
+                  onChange={(event) =>
+                    setCategory(event.target.value)
+                  }
+                  placeholder="Aggregation"
+                  className={inputClassName}
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="admin-companies"
+                  className={labelClassName}
+                >
+                  Companies
+                </label>
+
+                <input
+                  id="admin-companies"
+                  type="text"
+                  value={companiesText}
+                  onChange={(event) =>
+                    setCompaniesText(
+                      event.target.value,
+                    )
+                  }
+                  placeholder="Amazon, Google, Microsoft"
+                  className={inputClassName}
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="admin-languages"
+                  className={labelClassName}
+                >
+                  Languages
+                </label>
+
+                <input
+                  id="admin-languages"
+                  type="text"
+                  value={languagesText}
+                  onChange={(event) =>
+                    setLanguagesText(
+                      event.target.value,
+                    )
+                  }
+                  placeholder="PostgreSQL"
+                  className={inputClassName}
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="admin-tags"
+                  className={labelClassName}
+                >
+                  Tags
+                </label>
+
+                <input
+                  id="admin-tags"
+                  type="text"
+                  value={tagsText}
+                  onChange={(event) =>
+                    setTagsText(event.target.value)
+                  }
+                  placeholder="GROUP BY, SUM, COUNT"
+                  className={inputClassName}
+                />
+              </div>
+            </div>
+
+            <p className="mt-3 text-xs text-gray-400">
+              Companies, Languages and Tags accept
+              comma-separated values, for example:
+              Amazon, Google, Microsoft.
+            </p>
+          </section>
+
+          {/* SQL fields */}
+          <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+            <h2 className="font-semibold text-gray-900">
+              SQL fields
+            </h2>
+
+            <div className="mt-4">
+              <label
+                htmlFor="admin-starter-sql"
+                className={labelClassName}
+              >
+                Starter SQL
+              </label>
+
+              <textarea
+                id="admin-starter-sql"
+                value={starterSql}
+                onChange={(event) =>
+                  setStarterSql(event.target.value)
+                }
+                placeholder="SELECT * FROM customers;"
+                rows={6}
+                spellCheck={false}
+                className={`${inputClassName} resize-y font-mono`}
+              />
+            </div>
+
+            <div className="mt-4">
+              <label
+                htmlFor="admin-expected-result"
+                className={labelClassName}
+              >
+                Expected Result (JSON)
+              </label>
+
+              <textarea
+                id="admin-expected-result"
+                value={expectedResultText}
+                onChange={(event) =>
+                  setExpectedResultText(
+                    event.target.value,
+                  )
+                }
+                placeholder='[{"customer_id": 1, "total_orders": 5}]'
+                rows={8}
+                spellCheck={false}
+                className={`${inputClassName} resize-y font-mono`}
+              />
+
+              <p className="mt-2 text-xs text-gray-400">
+                Enter a JSON array of expected result
+                rows. An empty array is valid.
+              </p>
+            </div>
+          </section>
+
+          {/* Database schema */}
+          <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-gray-900">
+                Database schema
+              </h2>
+
+              <button
+                type="button"
+                onClick={addTable}
+                className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50"
+              >
+                <Plus size={14} />
+                Add table
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              {tables.map((table, tableIndex) => (
+                <div
+                  key={tableIndex}
+                  className="rounded-lg border border-gray-200 p-4"
+                >
+                  <div className="flex items-center gap-2">
+                    <Table2
+                      size={16}
+                      className="shrink-0 text-gray-500"
+                    />
+
+                    <input
+                      type="text"
+                      value={table.name}
+                      onChange={(event) =>
+                        updateTable(tableIndex, {
+                          name: event.target.value,
+                        })
+                      }
+                      placeholder="Table name, for example: customers"
+                      aria-label={`Table ${tableIndex + 1} name`}
+                      className={`${inputClassName} font-mono`}
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        removeTable(tableIndex)
+                      }
+                      aria-label={`Remove table ${tableIndex + 1}`}
+                      className="shrink-0 rounded-lg border border-gray-200 p-2 text-gray-400 hover:bg-gray-50 hover:text-gray-700"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+
+                  <div className="mt-3 space-y-2">
+                    {table.columns.map(
+                      (column, columnIndex) => (
+                        <div
+                          key={columnIndex}
+                          className="flex flex-col gap-2 sm:flex-row sm:items-center"
+                        >
+                          <input
+                            type="text"
+                            value={column.name}
+                            onChange={(event) =>
+                              updateColumn(
+                                tableIndex,
+                                columnIndex,
+                                {
+                                  name: event.target
+                                    .value,
+                                },
+                              )
+                            }
+                            placeholder="Column name"
+                            aria-label={`Table ${tableIndex + 1} column ${columnIndex + 1} name`}
+                            className={`${inputClassName} w-auto! min-w-0 flex-1 font-mono`}
+                          />
+
+                          <select
+                            value={column.type}
+                            onChange={(event) =>
+                              updateColumn(
+                                tableIndex,
+                                columnIndex,
+                                {
+                                  type: event.target
+                                    .value as ColumnType,
+                                },
+                              )
+                            }
+                            aria-label={`Table ${tableIndex + 1} column ${columnIndex + 1} type`}
+                            className={`${inputClassName} w-[140px]! flex-none cursor-pointer font-mono`}
+                          >
+                            {COLUMN_TYPES.map(
+                              (option) => (
+                                <option
+                                  key={option}
+                                  value={option}
+                                >
+                                  {option}
+                                </option>
+                              ),
+                            )}
+                          </select>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              removeColumn(
+                                tableIndex,
+                                columnIndex,
+                              )
+                            }
+                            aria-label={`Remove column ${columnIndex + 1} from table ${tableIndex + 1}`}
+                            className="shrink-0 self-end rounded-lg border border-gray-200 p-2 text-gray-400 hover:bg-gray-50 hover:text-gray-700 sm:self-auto"
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
+                      ),
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      addColumn(tableIndex)
+                    }
+                    className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                  >
+                    <Plus size={13} />
+                    Add column
+                  </button>
+
+                  <div className="mt-3">
+                    <label
+                      htmlFor={`admin-sample-rows-${tableIndex}`}
+                      className={labelClassName}
+                    >
+                      Sample rows (JSON)
+                    </label>
+
+                    <textarea
+                      id={`admin-sample-rows-${tableIndex}`}
+                      value={table.sampleRowsText}
+                      onChange={(event) =>
+                        updateTable(tableIndex, {
+                          sampleRowsText:
+                            event.target.value,
+                        })
+                      }
+                      placeholder='[{"id": 1, "name": "Alice"}]'
+                      rows={4}
+                      spellCheck={false}
+                      className={`${inputClassName} resize-y font-mono`}
+                    />
+                  </div>
+                </div>
+              ))}
+
+              {tables.length === 0 && (
+                <p className="text-sm text-gray-400">
+                  No tables yet. Add at least one table
+                  with one column.
+                </p>
+              )}
+            </div>
+          </section>
+
+          <button
+            type="button"
+            onClick={handleCreate}
+            className="mt-6 w-full rounded-lg bg-gray-900 px-4 py-3 text-sm font-medium text-white hover:bg-gray-800"
+          >
+            Create Question
+          </button>
+
+          {/* Admin question list */}
+          <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-gray-900">
+                Local questions
+              </h2>
+
+              {adminQuestions.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearAll}
+                  className={`rounded-lg border px-3 py-1.5 text-xs ${
+                    confirmClearAll
+                      ? "border-red-300 bg-red-50 font-medium text-red-600 hover:bg-red-100"
+                      : "border-gray-200 text-gray-500 hover:bg-gray-50"
+                  }`}
+                >
+                  {confirmClearAll
+                    ? "Click again to confirm clear all"
+                    : "Clear all"}
+                </button>
+              )}
+            </div>
+
+            {adminQuestions.length === 0 ? (
+              <p className="mt-3 text-sm text-gray-400">
+                No local questions yet. Created
+                questions will appear here.
+              </p>
+            ) : (
+              <ul className="mt-4 divide-y divide-gray-100">
+                {adminQuestions.map((item) => (
+                  <li
+                    key={item.id}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-gray-900">
+                        {item.title}
+                      </p>
+
+                      <p className="mt-0.5 text-xs text-gray-400">
+                        {item.difficulty} ·{" "}
+                        {item.questionType} ·{" "}
+                        {item.category}
+                        {item.companies.length > 0 &&
+                          ` · ${item.companies.join(", ")}`}{" "}
+                        ·{" "}
+                        <span className="font-mono">
+                          {item.id}
+                        </span>
+                      </p>
+                    </div>
+
+                    <span className="ml-auto flex shrink-0 items-center gap-2">
+                      <Link
+                        to={`/question/${item.id}`}
+                        className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                      >
+                        Open
+                      </Link>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDelete(item.id)
+                        }
+                        className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-red-600"
+                      >
+                        <Trash2 size={13} />
+                        Delete
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+export default AdminPage;

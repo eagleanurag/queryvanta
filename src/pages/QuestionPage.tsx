@@ -19,6 +19,7 @@ import {
 
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -33,6 +34,7 @@ import type { PGlite } from "@electric-sql/pglite";
 
 import { questions } from "../data/questions";
 import type { TableDefinition } from "../data/questions";
+import { getAdminQuestions } from "../lib/adminQuestions";
 import {
   clearAttempts,
   getAttempts,
@@ -296,23 +298,28 @@ function QuestionPage() {
   const { questionId } = useParams();
   const navigate = useNavigate();
 
-  const question = questions.find(
+  const allQuestions = useMemo(
+    () => [...questions, ...getAdminQuestions()],
+    [questionId],
+  );
+
+  const question = allQuestions.find(
     (item) => item.id === questionId,
   );
 
-  const currentQuestionIndex = questions.findIndex(
+  const currentQuestionIndex = allQuestions.findIndex(
     (item) => item.id === questionId,
   );
 
   const previousQuestion =
     currentQuestionIndex > 0
-      ? questions[currentQuestionIndex - 1]
+      ? allQuestions[currentQuestionIndex - 1]
       : null;
 
   const nextQuestion =
     currentQuestionIndex >= 0 &&
-    currentQuestionIndex < questions.length - 1
-      ? questions[currentQuestionIndex + 1]
+    currentQuestionIndex < allQuestions.length - 1
+      ? allQuestions[currentQuestionIndex + 1]
       : null;
 
   const database = question?.database;
@@ -1286,8 +1293,8 @@ function QuestionPage() {
 
             <span className="text-xs text-gray-500">
               {currentQuestionIndex >= 0
-                ? `Question ${currentQuestionIndex + 1} of ${questions.length}`
-                : `Question 0 of ${questions.length}`}
+                ? `Question ${currentQuestionIndex + 1} of ${allQuestions.length}`
+                : `Question 0 of ${allQuestions.length}`}
             </span>
 
             <button

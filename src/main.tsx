@@ -7,6 +7,7 @@ import {
 } from "react-router-dom";
 
 import App from "./App";
+import AdminPage from "./pages/AdminPage";
 import QuestionPage from "./pages/QuestionPage";
 
 import "./index.css";
@@ -16,6 +17,8 @@ createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<App />} />
+
+        <Route path="/admin" element={<AdminPage />} />
 
         <Route
           path="/question/:questionId"
