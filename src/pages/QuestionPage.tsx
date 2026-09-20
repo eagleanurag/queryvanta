@@ -524,11 +524,30 @@ function QuestionPage() {
                   onChange={(event) =>
                     setSql(event.target.value)
                   }
+                  onKeyDown={(event) => {
+                    if (
+                      event.key === "Enter" &&
+                      (event.ctrlKey ||
+                        event.metaKey)
+                    ) {
+                      event.preventDefault();
+
+                      if (
+                        !isDatabaseReady ||
+                        executionStatus ===
+                          "running"
+                      ) {
+                        return;
+                      }
+
+                      void runQuery();
+                    }
+                  }}
                   spellCheck={false}
                   className="min-h-[360px] w-full resize-y rounded-lg border border-gray-200 bg-gray-950 p-4 font-mono text-sm leading-6 text-gray-100 outline-none focus:border-gray-400"
                 />
 
-                <div className="mt-4 flex items-center gap-2">
+                <div className="mt-4 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={runQuery}
@@ -567,6 +586,10 @@ function QuestionPage() {
                     <RotateCcw size={14} />
                     Reset Code
                   </button>
+
+                  <span className="ml-auto text-xs text-gray-400">
+                    Ctrl/Cmd + Enter to run
+                  </span>
                 </div>
 
                 {executionStatus === "success" && (
