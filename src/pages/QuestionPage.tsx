@@ -1,9 +1,11 @@
 import {
   ArrowLeft,
+  Check,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Clock3,
+  Copy,
   Loader2,
   Play,
   RotateCcw,
@@ -98,6 +100,18 @@ function QuestionPage() {
   const databaseRef =
     useRef<PGlite | null>(null);
 
+  const [isCopied, setIsCopied] = useState(false);
+
+  const copyTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current !== null) {
+        window.clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     setSql(
       question?.starterCode ??
@@ -110,6 +124,7 @@ function QuestionPage() {
     setExecutionTime(null);
     setValidationMessage("");
     setIsCorrect(null);
+    setIsCopied(false);
 
     setIsSolved(
       question
@@ -278,6 +293,24 @@ function QuestionPage() {
     setExecutionTime(null);
     setValidationMessage("");
     setIsCorrect(null);
+  };
+
+  const copySql = async () => {
+    try {
+      await navigator.clipboard.writeText(sql);
+
+      setIsCopied(true);
+
+      if (copyTimeoutRef.current !== null) {
+        window.clearTimeout(copyTimeoutRef.current);
+      }
+
+      copyTimeoutRef.current = window.setTimeout(() => {
+        setIsCopied(false);
+      }, 1800);
+    } catch {
+      setIsCopied(false);
+    }
   };
 
   if (!question) {
@@ -585,6 +618,19 @@ function QuestionPage() {
                   >
                     <RotateCcw size={14} />
                     Reset Code
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => void copySql()}
+                    className="flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-xs text-gray-500 hover:bg-gray-50"
+                  >
+                    {isCopied ? (
+                      <Check size={14} />
+                    ) : (
+                      <Copy size={14} />
+                    )}
+                    {isCopied ? "Copied" : "Copy SQL"}
                   </button>
 
                   <span className="ml-auto text-xs text-gray-400">
