@@ -7,6 +7,8 @@ import {
   ChevronRight,
   Clock3,
   Copy,
+  Eye,
+  EyeOff,
   Loader2,
   Play,
   RotateCcw,
@@ -43,48 +45,135 @@ type ExecutionStatus =
   | "success"
   | "error";
 
-function SchemaTable({ table }: { table: TableDefinition }) {
+function SchemaTable({
+  table,
+  onPreviewRows,
+}: {
+  table: TableDefinition;
+  onPreviewRows: (
+    tableName: string,
+  ) => Promise<Record<string, unknown>[]>;
+}) {
   const [isExpanded, setIsExpanded] =
     useState(true);
 
+  const [isPreviewVisible, setIsPreviewVisible] =
+    useState(false);
+
+  const [previewRows, setPreviewRows] = useState<
+    Record<string, unknown>[] | null
+  >(null);
+
+  const [isPreviewLoading, setIsPreviewLoading] =
+    useState(false);
+
+  const [previewError, setPreviewError] =
+    useState("");
+
+  const previewColumns =
+    previewRows && previewRows.length > 0
+      ? Object.keys(previewRows[0])
+      : [];
+
+  const handlePreviewToggle = async () => {
+    if (isPreviewLoading) {
+      return;
+    }
+
+    if (isPreviewVisible) {
+      setIsPreviewVisible(false);
+      return;
+    }
+
+    if (previewRows !== null && !previewError) {
+      setIsPreviewVisible(true);
+      return;
+    }
+
+    setIsPreviewLoading(true);
+    setPreviewError("");
+
+    try {
+      const rows = await onPreviewRows(table.name);
+
+      setPreviewRows(rows);
+      setIsPreviewVisible(true);
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : String(err);
+
+      setPreviewError(message);
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
   return (
     <div>
-      <button
-        type="button"
-        onClick={() =>
-          setIsExpanded((previous) => !previous)
-        }
-        aria-expanded={isExpanded}
-        className="flex w-full items-center gap-2 py-3 text-left"
-      >
-        {isExpanded ? (
-          <ChevronDown
+      <div className="flex w-full items-center gap-2 py-3">
+        <button
+          type="button"
+          onClick={() =>
+            setIsExpanded((previous) => !previous)
+          }
+          aria-expanded={isExpanded}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          {isExpanded ? (
+            <ChevronDown
+              size={15}
+              className="shrink-0 text-gray-400"
+            />
+          ) : (
+            <ChevronRight
+              size={15}
+              className="shrink-0 text-gray-400"
+            />
+          )}
+
+          <Table2
             size={15}
-            className="shrink-0 text-gray-400"
+            className="shrink-0 text-gray-500"
           />
-        ) : (
-          <ChevronRight
-            size={15}
-            className="shrink-0 text-gray-400"
-          />
-        )}
 
-        <Table2
-          size={15}
-          className="shrink-0 text-gray-500"
-        />
+          <span className="truncate font-mono text-sm font-medium text-gray-800">
+            {table.name}
+          </span>
 
-        <span className="font-mono text-sm font-medium text-gray-800">
-          {table.name}
-        </span>
+          <span className="ml-auto shrink-0 text-xs text-gray-400">
+            {table.columns.length}{" "}
+            {table.columns.length === 1
+              ? "column"
+              : "columns"}
+          </span>
+        </button>
 
-        <span className="ml-auto text-xs text-gray-400">
-          {table.columns.length}{" "}
-          {table.columns.length === 1
-            ? "column"
-            : "columns"}
-        </span>
-      </button>
+        <button
+          type="button"
+          onClick={() => void handlePreviewToggle()}
+          disabled={isPreviewLoading}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isPreviewLoading ? (
+            <Loader2
+              size={13}
+              className="animate-spin"
+            />
+          ) : isPreviewVisible ? (
+            <EyeOff size={13} />
+          ) : (
+            <Eye size={13} />
+          )}
+
+          {isPreviewLoading
+            ? "Loading..."
+            : isPreviewVisible
+              ? "Hide preview"
+              : "Preview data"}
+        </button>
+      </div>
 
       {isExpanded && (
         <div className="pb-3 pl-7">
@@ -104,6 +193,92 @@ function SchemaTable({ table }: { table: TableDefinition }) {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {(isPreviewVisible ||
+        isPreviewLoading ||
+        previewError) && (
+        <div className="pb-3 pl-7">
+          {isPreviewLoading && previewRows === null && !previewError ? (
+            <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-3 text-center">
+              <p className="text-xs text-gray-400">
+                Loading...
+              </p>
+            </div>
+          ) : previewError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+              <p className="text-xs text-red-600">
+                Preview failed: {previewError}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-lg border border-gray-200">
+              <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-4 py-2">
+                <span className="text-xs font-medium text-gray-600">
+                  Preview
+                </span>
+
+                <span className="text-xs text-gray-400">
+                  {(previewRows ?? []).length}{" "}
+                  {(previewRows ?? []).length === 1
+                    ? "row"
+                    : "rows"}
+                </span>
+              </div>
+
+              {(previewRows ?? []).length > 0 ? (
+                <div className="overflow-auto">
+                  <table className="min-w-full text-left text-xs">
+                    <thead className="border-b border-gray-200 bg-gray-50">
+                      <tr>
+                        {previewColumns.map(
+                          (column) => (
+                            <th
+                              key={column}
+                              className="whitespace-nowrap px-4 py-2 font-semibold text-gray-600"
+                            >
+                              {column}
+                            </th>
+                          ),
+                        )}
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-gray-100">
+                      {(previewRows ?? []).map(
+                        (row, rowIndex) => (
+                          <tr
+                            key={rowIndex}
+                            className="hover:bg-gray-50"
+                          >
+                            {previewColumns.map(
+                              (column) => (
+                                <td
+                                  key={column}
+                                  className="whitespace-nowrap px-4 py-2 font-mono text-gray-600"
+                                >
+                                  {row[column] === null
+                                    ? "NULL"
+                                    : String(
+                                        row[column],
+                                      )}
+                                </td>
+                              ),
+                            )}
+                          </tr>
+                        ),
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="px-4 py-3 text-xs text-gray-400">
+                  No rows found.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -383,6 +558,25 @@ function QuestionPage() {
     }
   };
 
+  const previewTableRows = async (
+    tableName: string,
+  ): Promise<Record<string, unknown>[]> => {
+    const db = databaseRef.current;
+
+    if (!db) {
+      throw new Error("Database is not ready yet.");
+    }
+
+    const quotedTableName = `"${tableName.replaceAll('"', '""')}"`;
+
+    const result =
+      await db.query<Record<string, unknown>>(
+        `SELECT * FROM ${quotedTableName} LIMIT 5`,
+      );
+
+    return result.rows;
+  };
+
   if (!question) {
     return (
       <div className="min-h-screen bg-[#f6f7f9] p-8">
@@ -535,6 +729,7 @@ function QuestionPage() {
                   <SchemaTable
                     key={`${question.id}-${table.name}`}
                     table={table}
+                    onPreviewRows={previewTableRows}
                   />
                 ))}
               </div>
