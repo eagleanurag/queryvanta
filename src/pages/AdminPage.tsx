@@ -3,6 +3,7 @@ import { useState } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
+  Pencil,
   Plus,
   Table2,
   Trash2,
@@ -23,6 +24,7 @@ import {
   deleteAdminQuestion,
   getAdminQuestions,
   saveAdminQuestion,
+  updateAdminQuestion,
 } from "../lib/adminQuestions";
 
 const COLUMN_TYPES: ColumnType[] = [
@@ -116,6 +118,16 @@ function AdminPage() {
 
   const [confirmClearAll, setConfirmClearAll] =
     useState(false);
+
+  const [editingQuestionId, setEditingQuestionId] =
+    useState<string | null>(null);
+
+  const isEditing = editingQuestionId !== null;
+
+  const editingQuestionTitle =
+    adminQuestions.find(
+      (item) => item.id === editingQuestionId,
+    )?.title ?? "";
 
   const updateTable = (
     tableIndex: number,
@@ -219,7 +231,7 @@ function AdminPage() {
     setTables([createEmptyTable()]);
   };
 
-  const handleCreate = () => {
+  const handleSubmit = () => {
     const validationErrors: string[] = [];
 
     if (title.trim() === "") {
@@ -376,7 +388,7 @@ function AdminPage() {
     const languages = parseCsv(languagesText);
 
     const question: Question = {
-      id: generateQuestionId(),
+      id: editingQuestionId ?? generateQuestionId(),
       title: title.trim(),
       description: description.trim(),
       difficulty,
@@ -408,20 +420,83 @@ function AdminPage() {
       },
     };
 
-    const updated = saveAdminQuestion(question);
+    const updated = isEditing
+      ? updateAdminQuestion(question)
+      : saveAdminQuestion(question);
 
     setAdminQuestions(updated);
     setErrors([]);
     setSuccessMessage(
-      `Question "${question.title}" created successfully.`,
+      isEditing
+        ? `Question "${question.title}" updated successfully.`
+        : `Question "${question.title}" created successfully.`,
     );
     setCreatedQuestionId(question.id);
+    setEditingQuestionId(null);
+    resetForm();
+  };
+
+  const handleEdit = (question: Question) => {
+    setTitle(question.title);
+    setDescription(question.description);
+    setDifficulty(
+      DIFFICULTIES.includes(
+        question.difficulty as Difficulty,
+      )
+        ? (question.difficulty as Difficulty)
+        : "Easy",
+    );
+    setCategory(question.category);
+    setCompaniesText(question.companies.join(", "));
+    setLanguagesText(question.languages.join(", "));
+    setTagsText(question.tags.join(", "));
+    setStarterSql(question.starterCode ?? "");
+    setExpectedResultText(
+      JSON.stringify(
+        question.validation?.expectedResult ?? [],
+        null,
+        2,
+      ),
+    );
+    setTables(
+      question.database && question.database.tables.length > 0
+        ? question.database.tables.map((table) => ({
+            name: table.name,
+            columns: table.columns.map((column) => ({
+              name: column.name,
+              type: column.type,
+            })),
+            sampleRowsText: JSON.stringify(
+              table.rows,
+              null,
+              2,
+            ),
+          }))
+        : [createEmptyTable()],
+    );
+    setEditingQuestionId(question.id);
+    setErrors([]);
+    setSuccessMessage("");
+    setCreatedQuestionId("");
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingQuestionId(null);
+    setErrors([]);
     resetForm();
   };
 
   const handleDelete = (questionId: string) => {
     setAdminQuestions(deleteAdminQuestion(questionId));
     setConfirmClearAll(false);
+
+    if (editingQuestionId === questionId) {
+      setEditingQuestionId(null);
+      setErrors([]);
+      resetForm();
+    }
   };
 
   const handleClearAll = () => {
@@ -432,6 +507,9 @@ function AdminPage() {
 
     setAdminQuestions(clearAdminQuestions());
     setConfirmClearAll(false);
+    setEditingQuestionId(null);
+    setErrors([]);
+    resetForm();
   };
 
   return (
@@ -514,6 +592,21 @@ function AdminPage() {
                   </Link>
                 </p>
               )}
+            </div>
+          )}
+
+          {isEditing && (
+            <div className="mt-6 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-5">
+              <Pencil
+                size={16}
+                className="shrink-0 text-amber-600"
+              />
+
+              <p className="text-sm font-medium text-amber-700">
+                Editing question
+                {editingQuestionTitle !== "" &&
+                  `: "${editingQuestionTitle}"`}
+              </p>
             </div>
           )}
 
@@ -931,11 +1024,21 @@ function AdminPage() {
 
           <button
             type="button"
-            onClick={handleCreate}
+            onClick={handleSubmit}
             className="mt-6 w-full rounded-lg bg-gray-900 px-4 py-3 text-sm font-medium text-white hover:bg-gray-800"
           >
-            Create Question
+            {isEditing ? "Save Changes" : "Create Question"}
           </button>
+
+          {isEditing && (
+            <button
+              type="button"
+              onClick={handleCancelEdit}
+              className="mt-3 w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          )}
 
           {/* Admin question list */}
           <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -998,6 +1101,17 @@ function AdminPage() {
                       >
                         Open
                       </Link>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleEdit(item)
+                        }
+                        className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+                      >
+                        <Pencil size={13} />
+                        Edit
+                      </button>
 
                       <button
                         type="button"

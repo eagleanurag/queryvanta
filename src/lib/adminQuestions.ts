@@ -84,10 +84,29 @@ export function saveAdminQuestion(
   return adminQuestions;
 }
 
+export function updateAdminQuestion(
+  question: Question,
+): Question[] {
+  const adminQuestions = readAdminQuestions();
+
+  const existingIndex = adminQuestions.findIndex(
+    (item) => item.id === question.id,
+  );
+
+  if (existingIndex === -1) {
+    return adminQuestions;
+  }
+
+  adminQuestions[existingIndex] = question;
+
+  writeAdminQuestions(adminQuestions);
+
+  return adminQuestions;
+}
+
 export function deleteAdminQuestion(
   questionId: string,
-): Question[] {
-  const adminQuestions = readAdminQuestions().filter(
+): Question[] {  const adminQuestions = readAdminQuestions().filter(
     (question) => question.id !== questionId,
   );
 
