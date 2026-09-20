@@ -37,6 +37,7 @@ export type ValidationType = "result";
 
 export type QuestionValidation = {
   type: ValidationType;
+  orderMatters?: boolean;
   expectedResult: Record<string, unknown>[];
 };
 
@@ -164,6 +165,7 @@ ORDER BY duration_seconds;`,
 
     validation: {
       type: "result",
+      orderMatters: true,
 
       expectedResult: [
         {
@@ -290,6 +292,29 @@ ORDER BY total_revenue DESC;`,
         },
       ],
     },
+
+    validation: {
+      type: "result",
+      orderMatters: true,
+
+      expectedResult: [
+        {
+          customer_id: 1,
+          total_orders: 3,
+          total_revenue: 7200,
+        },
+        {
+          customer_id: 2,
+          total_orders: 2,
+          total_revenue: 6000,
+        },
+        {
+          customer_id: 3,
+          total_orders: 1,
+          total_revenue: 950,
+        },
+      ],
+    },
   },
 
   {
@@ -314,7 +339,8 @@ ORDER BY total_revenue DESC;`,
         PARTITION BY department
         ORDER BY salary DESC
     ) AS salary_rank
-FROM employees;`,
+FROM employees
+ORDER BY department, salary_rank;`,
 
     database: {
       engine: "PostgreSQL",
@@ -387,6 +413,55 @@ FROM employees;`,
         },
       ],
     },
+
+    validation: {
+      type: "result",
+
+      expectedResult: [
+        {
+          employee_id: 2,
+          employee_name: "Meera",
+          department: "Engineering",
+          salary: 142000,
+          salary_rank: 1,
+        },
+        {
+          employee_id: 1,
+          employee_name: "Aarav",
+          department: "Engineering",
+          salary: 125000,
+          salary_rank: 2,
+        },
+        {
+          employee_id: 3,
+          employee_name: "Rohan",
+          department: "Engineering",
+          salary: 118000,
+          salary_rank: 3,
+        },
+        {
+          employee_id: 5,
+          employee_name: "Vikram",
+          department: "Finance",
+          salary: 132000,
+          salary_rank: 1,
+        },
+        {
+          employee_id: 6,
+          employee_name: "Ishita",
+          department: "Finance",
+          salary: 125000,
+          salary_rank: 2,
+        },
+        {
+          employee_id: 4,
+          employee_name: "Ananya",
+          department: "Finance",
+          salary: 110000,
+          salary_rank: 3,
+        },
+      ],
+    },
   },
 
   {
@@ -413,7 +488,8 @@ FROM employees;`,
 )
 SELECT *
 FROM ranked_customers
-WHERE row_num = 1;`,
+WHERE row_num = 1
+ORDER BY email;`,
 
     database: {
       engine: "PostgreSQL",
@@ -477,6 +553,34 @@ WHERE row_num = 1;`,
               updated_at: "2026-03-02 16:10:00",
             },
           ],
+        },
+      ],
+    },
+
+    validation: {
+      type: "result",
+
+      expectedResult: [
+        {
+          customer_id: 4,
+          name: "Amit Verma",
+          email: "amit@example.com",
+          updated_at: "2026-02-01 11:45:00",
+          row_num: 1,
+        },
+        {
+          customer_id: 5,
+          name: "Priya S",
+          email: "priya@example.com",
+          updated_at: "2026-03-02 16:10:00",
+          row_num: 1,
+        },
+        {
+          customer_id: 2,
+          name: "Rahul S Sharma",
+          email: "rahul@example.com",
+          updated_at: "2026-02-10 14:20:00",
+          row_num: 1,
         },
       ],
     },

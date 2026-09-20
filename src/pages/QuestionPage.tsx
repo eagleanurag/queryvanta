@@ -196,6 +196,8 @@ function QuestionPage() {
         const validation = validateResult(
           result.rows,
           currentQuestion.validation.expectedResult,
+          currentQuestion.validation.orderMatters ??
+            false,
         );
 
         setIsCorrect(validation.correct);
