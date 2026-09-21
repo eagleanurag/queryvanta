@@ -9,6 +9,7 @@ import {
 import App from "./App";
 import AdminPage from "./pages/AdminPage";
 import ProgressPage from "./pages/ProgressPage";
+import PySparkTestPage from "./pages/PySparkTestPage";
 import QuestionPage from "./pages/QuestionPage";
 
 import "./index.css";
@@ -24,6 +25,11 @@ createRoot(document.getElementById("root")!).render(
         <Route
           path="/progress"
           element={<ProgressPage />}
+        />
+
+        <Route
+          path="/pyspark-test"
+          element={<PySparkTestPage />}
         />
 
         <Route
