@@ -1,0 +1,16 @@
+# QueryVanta local Spark Connect server.
+#
+# Base image provides Spark 4.2.0 + Java. The Spark Connect
+# Python client dependencies (grpcio, pandas, pyarrow, ...)
+# are NOT included in the base image, so they are baked in
+# here. Installed as root so every runtime user gets them
+# from the system site-packages (no HOME workarounds).
+FROM apache/spark:4.2.0-python3
+
+USER root
+
+RUN python3 -m pip install --no-cache-dir "pyspark[connect]==4.2.0"
+
+USER spark
+
+EXPOSE 15002

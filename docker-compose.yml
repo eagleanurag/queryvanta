@@ -1,0 +1,17 @@
+# Local developer infrastructure only.
+# The QueryVanta frontend does not depend on this file.
+services:
+  spark:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.spark
+    image: queryvanta-spark:4.2.0
+    container_name: queryvanta-spark
+    ports:
+      - "127.0.0.1:15002:15002"
+    environment:
+      SPARK_NO_DAEMONIZE: "1"
+    command:
+      - bash
+      - -c
+      - /opt/spark/sbin/start-connect-server.sh
