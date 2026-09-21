@@ -15,6 +15,8 @@ export type NewQuestionAttempt = Omit<
 
 const STORAGE_KEY = "queryvanta-question-attempts";
 
+const ATTEMPTS_EVENT = "queryvanta-attempts-changed";
+
 const MAX_ATTEMPTS_PER_QUESTION = 10;
 
 function isValidAttempt(value: unknown): value is QuestionAttempt {
@@ -79,6 +81,10 @@ function writeAllAttempts(
       STORAGE_KEY,
       JSON.stringify(attempts),
     );
+
+    window.dispatchEvent(
+      new Event(ATTEMPTS_EVENT),
+    );
   } catch {
     // Ignore storage failures so query execution
     // continues working even if localStorage is unavailable.
@@ -87,6 +93,13 @@ function writeAllAttempts(
 
 export function getAttempts(questionId: string): QuestionAttempt[] {
   return readAllAttempts()[questionId] ?? [];
+}
+
+export function getAllAttempts(): Record<
+  string,
+  QuestionAttempt[]
+> {
+  return readAllAttempts();
 }
 
 export function recordAttempt(
@@ -128,4 +141,4 @@ export function clearAttempts(questionId: string): void {
   writeAllAttempts(allAttempts);
 }
 
-export { MAX_ATTEMPTS_PER_QUESTION };
+export { ATTEMPTS_EVENT, MAX_ATTEMPTS_PER_QUESTION };

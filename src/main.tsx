@@ -8,6 +8,7 @@ import {
 
 import App from "./App";
 import AdminPage from "./pages/AdminPage";
+import ProgressPage from "./pages/ProgressPage";
 import QuestionPage from "./pages/QuestionPage";
 
 import "./index.css";
@@ -19,6 +20,11 @@ createRoot(document.getElementById("root")!).render(
         <Route path="/" element={<App />} />
 
         <Route path="/admin" element={<AdminPage />} />
+
+        <Route
+          path="/progress"
+          element={<ProgressPage />}
+        />
 
         <Route
           path="/admin/preview"

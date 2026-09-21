@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { Link } from "react-router-dom";
+
 import {
   BarChart3,
   BookOpen,
@@ -38,6 +40,7 @@ const navigation = [
   { label: "Learn", icon: BookOpen },
   { label: "Tracks", icon: Target },
   { label: "Projects", icon: FolderKanban },
+  { label: "Progress", icon: BarChart3, to: "/progress" },
 ];
 
 const practiceItems = [
@@ -407,6 +410,22 @@ function App() {
           <nav className="px-3">
             {navigation.map((item) => {
               const Icon = item.icon;
+
+              if ("to" in item && item.to) {
+                return (
+                  <Link
+                    key={item.label}
+                    to={item.to}
+                    className="mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[14px] text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
+                  >
+                    <Icon
+                      size={17}
+                      strokeWidth={1.8}
+                    />
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              }
 
               return (
                 <button
