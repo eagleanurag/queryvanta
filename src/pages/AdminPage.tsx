@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 
 import {
@@ -9,6 +9,7 @@ import {
   Eye,
   Pencil,
   Plus,
+  Search,
   Table2,
   Trash2,
   Upload,
@@ -31,6 +32,7 @@ import type {
 import {
   clearAdminQuestions,
   deleteAdminQuestion,
+  deleteAdminQuestions,
   duplicateAdminQuestion,
   getAdminQuestions,
   importAdminQuestions,
@@ -38,6 +40,16 @@ import {
   updateAdminQuestion,
   validateImportedQuestions,
 } from "../lib/adminQuestions";
+
+const LOCAL_SORT_OPTIONS = [
+  { value: "newest", label: "Newest first" },
+  { value: "oldest", label: "Oldest first" },
+  { value: "title-az", label: "Title A-Z" },
+  { value: "title-za", label: "Title Z-A" },
+] as const;
+
+type LocalSortOrder =
+  (typeof LOCAL_SORT_OPTIONS)[number]["value"];
 
 const COLUMN_TYPES: ColumnType[] = [
   "INTEGER",
@@ -182,6 +194,124 @@ function AdminPage() {
 
   const fileInputRef =
     useRef<HTMLInputElement | null>(null);
+
+  const [localSearch, setLocalSearch] = useState("");
+  const [localDifficulty, setLocalDifficulty] =
+    useState("All");
+  const [localQuestionType, setLocalQuestionType] =
+    useState("All");
+  const [localCategory, setLocalCategory] =
+    useState("All");
+  const [localSort, setLocalSort] =
+    useState<LocalSortOrder>("newest");
+  const [selectedIds, setSelectedIds] = useState<
+    Set<string>
+  >(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] =
+    useState(false);
+
+  const localQuestionTypes = useMemo(
+    () => [
+      "All",
+      ...Array.from(
+        new Set(
+          adminQuestions.map(
+            (question) => question.questionType,
+          ),
+        ),
+      ),
+    ],
+    [adminQuestions],
+  );
+
+  const localCategories = useMemo(
+    () => [
+      "All",
+      ...Array.from(
+        new Set(
+          adminQuestions.map(
+            (question) => question.category,
+          ),
+        ),
+      ),
+    ],
+    [adminQuestions],
+  );
+
+  const visibleLocalQuestions = useMemo(() => {
+    const normalizedSearch = localSearch
+      .trim()
+      .toLowerCase();
+
+    const filtered = adminQuestions.filter(
+      (question) => {
+        const matchesSearch =
+          normalizedSearch === "" ||
+          question.title
+            .toLowerCase()
+            .includes(normalizedSearch) ||
+          question.description
+            .toLowerCase()
+            .includes(normalizedSearch);
+
+        const matchesDifficulty =
+          localDifficulty === "All" ||
+          question.difficulty === localDifficulty;
+
+        const matchesType =
+          localQuestionType === "All" ||
+          question.questionType ===
+            localQuestionType;
+
+        const matchesCategory =
+          localCategory === "All" ||
+          question.category === localCategory;
+
+        return (
+          matchesSearch &&
+          matchesDifficulty &&
+          matchesType &&
+          matchesCategory
+        );
+      },
+    );
+
+    const sorted = [...filtered];
+
+    if (localSort === "oldest") {
+      sorted.reverse();
+    } else if (localSort === "title-az") {
+      sorted.sort((first, second) =>
+        first.title.localeCompare(second.title),
+      );
+    } else if (localSort === "title-za") {
+      sorted.sort((first, second) =>
+        second.title.localeCompare(first.title),
+      );
+    }
+
+    return sorted;
+  }, [
+    adminQuestions,
+    localSearch,
+    localDifficulty,
+    localQuestionType,
+    localCategory,
+    localSort,
+  ]);
+
+  const hasLocalFilters =
+    localSearch.trim() !== "" ||
+    localDifficulty !== "All" ||
+    localQuestionType !== "All" ||
+    localCategory !== "All";
+
+  const clearLocalFilters = () => {
+    setLocalSearch("");
+    setLocalDifficulty("All");
+    setLocalQuestionType("All");
+    setLocalCategory("All");
+  };
 
   const [editingQuestionId, setEditingQuestionId] =
     useState<string | null>(
@@ -632,11 +762,89 @@ function AdminPage() {
     setAdminQuestions(deleteAdminQuestion(questionId));
     setConfirmClearAll(false);
 
+    setSelectedIds((previous) => {
+      if (!previous.has(questionId)) {
+        return previous;
+      }
+
+      const next = new Set(previous);
+      next.delete(questionId);
+      return next;
+    });
+
     if (editingQuestionId === questionId) {
       setEditingQuestionId(null);
       setErrors([]);
       resetForm();
     }
+  };
+
+  const toggleSelectedId = (questionId: string) => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+
+      if (next.has(questionId)) {
+        next.delete(questionId);
+      } else {
+        next.add(questionId);
+      }
+
+      return next;
+    });
+  };
+
+  const selectAllVisible = () => {
+    setSelectedIds(
+      new Set(
+        visibleLocalQuestions.map(
+          (question) => question.id,
+        ),
+      ),
+    );
+  };
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+    setConfirmBulkDelete(false);
+  };
+
+  const handleBulkDelete = () => {
+    if (selectedIds.size === 0) {
+      return;
+    }
+
+    if (!confirmBulkDelete) {
+      setConfirmBulkDelete(true);
+      return;
+    }
+
+    const deletedIds = new Set(selectedIds);
+    const deletedCount = deletedIds.size;
+
+    setAdminQuestions(
+      deleteAdminQuestions([...deletedIds]),
+    );
+    setSelectedIds(new Set());
+    setConfirmBulkDelete(false);
+    setConfirmClearAll(false);
+
+    if (
+      editingQuestionId !== null &&
+      deletedIds.has(editingQuestionId)
+    ) {
+      setEditingQuestionId(null);
+      setErrors([]);
+      resetForm();
+    } else {
+      setErrors([]);
+    }
+
+    setSuccessMessage(
+      `Deleted ${deletedCount} ${
+        deletedCount === 1 ? "question" : "questions"
+      }.`,
+    );
+    setCreatedQuestionId("");
   };
 
   const handleDuplicate = (questionId: string) => {
@@ -665,6 +873,8 @@ function AdminPage() {
 
     setAdminQuestions(clearAdminQuestions());
     setConfirmClearAll(false);
+    setSelectedIds(new Set());
+    setConfirmBulkDelete(false);
     setEditingQuestionId(null);
     setErrors([]);
     resetForm();
@@ -1340,6 +1550,202 @@ function AdminPage() {
               </div>
             </div>
 
+            {adminQuestions.length > 0 && (
+              <div className="mt-4 space-y-3">
+                <div className="relative flex h-10 flex-1 items-center rounded-lg border border-gray-200 bg-gray-50">
+                  <Search
+                    size={15}
+                    className="ml-3 shrink-0 text-gray-400"
+                  />
+
+                  <input
+                    type="text"
+                    value={localSearch}
+                    onChange={(event) =>
+                      setLocalSearch(
+                        event.target.value,
+                      )
+                    }
+                    placeholder="Search local questions by title or description..."
+                    aria-label="Search local questions"
+                    className="h-full min-w-0 flex-1 bg-transparent px-3 text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                  />
+
+                  {localSearch && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setLocalSearch("")
+                      }
+                      className="mr-2 rounded-md p-1.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700"
+                      aria-label="Clear local search"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <select
+                    value={localDifficulty}
+                    onChange={(event) =>
+                      setLocalDifficulty(
+                        event.target.value,
+                      )
+                    }
+                    aria-label="Filter by difficulty"
+                    className="cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 outline-none hover:bg-gray-50"
+                  >
+                    <option value="All">
+                      All Difficulties
+                    </option>
+                    <option value="Easy">Easy</option>
+                    <option value="Medium">
+                      Medium
+                    </option>
+                    <option value="Hard">Hard</option>
+                  </select>
+
+                  <select
+                    value={localQuestionType}
+                    onChange={(event) =>
+                      setLocalQuestionType(
+                        event.target.value,
+                      )
+                    }
+                    aria-label="Filter by question type"
+                    className="cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 outline-none hover:bg-gray-50"
+                  >
+                    {localQuestionTypes.map(
+                      (option) => (
+                        <option
+                          key={option}
+                          value={option}
+                        >
+                          {option === "All"
+                            ? "All Types"
+                            : option}
+                        </option>
+                      ),
+                    )}
+                  </select>
+
+                  <select
+                    value={localCategory}
+                    onChange={(event) =>
+                      setLocalCategory(
+                        event.target.value,
+                      )
+                    }
+                    aria-label="Filter by category"
+                    className="cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 outline-none hover:bg-gray-50"
+                  >
+                    {localCategories.map((option) => (
+                      <option
+                        key={option}
+                        value={option}
+                      >
+                        {option === "All"
+                          ? "All Categories"
+                          : option}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={localSort}
+                    onChange={(event) =>
+                      setLocalSort(
+                        event.target
+                          .value as LocalSortOrder,
+                      )
+                    }
+                    aria-label="Sort local questions"
+                    className="cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 outline-none hover:bg-gray-50"
+                  >
+                    {LOCAL_SORT_OPTIONS.map(
+                      (option) => (
+                        <option
+                          key={option.value}
+                          value={option.value}
+                        >
+                          {option.label}
+                        </option>
+                      ),
+                    )}
+                  </select>
+
+                  {hasLocalFilters && (
+                    <button
+                      type="button"
+                      onClick={clearLocalFilters}
+                      className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-800"
+                    >
+                      <X size={13} />
+                      Clear filters
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3">
+                  <span className="text-xs text-gray-500">
+                    Showing{" "}
+                    {visibleLocalQuestions.length}{" "}
+                    of {adminQuestions.length}
+                    {selectedIds.size > 0 &&
+                      ` · ${selectedIds.size} selected`}
+                  </span>
+
+                  <span className="ml-auto flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={selectAllVisible}
+                      disabled={
+                        visibleLocalQuestions.length ===
+                        0
+                      }
+                      className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Select all visible
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={clearSelection}
+                      disabled={
+                        selectedIds.size === 0
+                      }
+                      className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Clear selection
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleBulkDelete}
+                      disabled={
+                        selectedIds.size === 0
+                      }
+                      className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50 ${
+                        confirmBulkDelete
+                          ? "border-red-300 bg-red-50 font-medium text-red-600 hover:bg-red-100"
+                          : "border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-red-600"
+                      }`}
+                    >
+                      <Trash2 size={13} />
+                      {confirmBulkDelete
+                        ? `Click again to delete ${selectedIds.size}`
+                        : `Delete selected${
+                            selectedIds.size > 0
+                              ? ` (${selectedIds.size})`
+                              : ""
+                          }`}
+                    </button>
+                  </span>
+                </div>
+              </div>
+            )}
+
             <input
               ref={fileInputRef}
               type="file"
@@ -1354,13 +1760,40 @@ function AdminPage() {
                 No local questions yet. Created
                 questions will appear here.
               </p>
+            ) : visibleLocalQuestions.length === 0 ? (
+              <div className="mt-4 rounded-lg border border-dashed border-gray-200 px-6 py-8 text-center">
+                <p className="text-sm font-medium text-gray-700">
+                  No local questions match the current
+                  search or filters.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={clearLocalFilters}
+                  className="mt-3 rounded-lg border border-gray-200 px-4 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                >
+                  Clear search &amp; filters
+                </button>
+              </div>
             ) : (
               <ul className="mt-4 divide-y divide-gray-100">
-                {adminQuestions.map((item) => (
+                {visibleLocalQuestions.map((item) => (
                   <li
                     key={item.id}
                     className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3"
                   >
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(
+                        item.id,
+                      )}
+                      onChange={() =>
+                        toggleSelectedId(item.id)
+                      }
+                      aria-label={`Select ${item.title}`}
+                      className="h-4 w-4 shrink-0 cursor-pointer accent-gray-900"
+                    />
+
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-gray-900">
                         {item.title}

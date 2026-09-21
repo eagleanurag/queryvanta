@@ -162,8 +162,17 @@ export function duplicateAdminQuestion(
 
 export function deleteAdminQuestion(
   questionId: string,
-): Question[] {  const adminQuestions = readAdminQuestions().filter(
-    (question) => question.id !== questionId,
+): Question[] {
+  return deleteAdminQuestions([questionId]);
+}
+
+export function deleteAdminQuestions(
+  questionIds: string[],
+): Question[] {
+  const idsToDelete = new Set(questionIds);
+
+  const adminQuestions = readAdminQuestions().filter(
+    (question) => !idsToDelete.has(question.id),
   );
 
   writeAdminQuestions(adminQuestions);
