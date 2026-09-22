@@ -2922,4 +2922,385 @@ ORDER BY salary DESC;`,
       ],
     },
   },
+
+  {
+    id: "pyspark-customer-revenue-totals",
+    title: "Customer Revenue Totals",
+    description:
+      "Compute total revenue per customer with PySpark and assign the answer to `result`.",
+    difficulty: "Easy",
+    questionType: "PySpark",
+    category: "Aggregation",
+    languages: ["PySpark"],
+    tags: ["GROUPBY", "AGGREGATION"],
+    companies: ["Meta"],
+    solved: false,
+
+    starterCode: `from pyspark.sql import functions as F
+
+orders = spark.createDataFrame(
+    [
+        (1, 1, 250.0),
+        (2, 2, 100.0),
+        (3, 1, 75.0),
+        (4, 3, 300.0),
+        (5, 2, 150.0),
+    ],
+    ["order_id", "customer_id", "amount"],
+)
+
+# TODO: compute total revenue per customer.
+# Assign the final DataFrame to \`result\` with columns
+# customer_id and total_revenue.
+result = orders`,
+
+    database: {
+      engine: "PostgreSQL",
+
+      tables: [
+        {
+          name: "orders",
+
+          columns: [
+            {
+              name: "order_id",
+              type: "INTEGER",
+              nullable: false,
+            },
+            {
+              name: "customer_id",
+              type: "INTEGER",
+              nullable: false,
+            },
+            {
+              name: "amount",
+              type: "DECIMAL",
+              nullable: false,
+            },
+          ],
+
+          rows: [
+            {
+              order_id: 1,
+              customer_id: 1,
+              amount: 250.0,
+            },
+            {
+              order_id: 2,
+              customer_id: 2,
+              amount: 100.0,
+            },
+            {
+              order_id: 3,
+              customer_id: 1,
+              amount: 75.0,
+            },
+            {
+              order_id: 4,
+              customer_id: 3,
+              amount: 300.0,
+            },
+            {
+              order_id: 5,
+              customer_id: 2,
+              amount: 150.0,
+            },
+          ],
+        },
+      ],
+    },
+
+    validation: {
+      type: "result",
+      orderMatters: false,
+
+      expectedResult: [
+        {
+          customer_id: 1,
+          total_revenue: 325.0,
+        },
+        {
+          customer_id: 2,
+          total_revenue: 250.0,
+        },
+        {
+          customer_id: 3,
+          total_revenue: 300.0,
+        },
+      ],
+    },
+  },
+
+  {
+    id: "pyspark-premium-customer-orders",
+    title: "Premium Customer Orders",
+    description:
+      "Join customers with orders in PySpark and keep customers spending over 250. Assign the answer to `result`.",
+    difficulty: "Medium",
+    questionType: "PySpark",
+    category: "Joins",
+    languages: ["PySpark"],
+    tags: ["JOIN", "GROUPBY", "FILTER"],
+    companies: ["Meta"],
+    solved: false,
+
+    starterCode: `from pyspark.sql import functions as F
+
+customers = spark.createDataFrame(
+    [
+        (1, "Aarav"),
+        (2, "Meera"),
+        (3, "Rohan"),
+    ],
+    ["customer_id", "customer_name"],
+)
+
+orders = spark.createDataFrame(
+    [
+        (101, 1, 120.0),
+        (102, 2, 300.0),
+        (103, 1, 200.0),
+        (104, 3, 50.0),
+        (105, 2, 100.0),
+    ],
+    ["order_id", "customer_id", "amount"],
+)
+
+# TODO: join the tables, compute total spend per customer,
+# and keep customers spending over 250.
+# Assign the final DataFrame to \`result\` with columns
+# customer_name and total_spent.
+result = customers`,
+
+    database: {
+      engine: "PostgreSQL",
+
+      tables: [
+        {
+          name: "customers",
+
+          columns: [
+            {
+              name: "customer_id",
+              type: "INTEGER",
+              nullable: false,
+            },
+            {
+              name: "customer_name",
+              type: "TEXT",
+              nullable: false,
+            },
+          ],
+
+          rows: [
+            {
+              customer_id: 1,
+              customer_name: "Aarav",
+            },
+            {
+              customer_id: 2,
+              customer_name: "Meera",
+            },
+            {
+              customer_id: 3,
+              customer_name: "Rohan",
+            },
+          ],
+        },
+        {
+          name: "orders",
+
+          columns: [
+            {
+              name: "order_id",
+              type: "INTEGER",
+              nullable: false,
+            },
+            {
+              name: "customer_id",
+              type: "INTEGER",
+              nullable: false,
+            },
+            {
+              name: "amount",
+              type: "DECIMAL",
+              nullable: false,
+            },
+          ],
+
+          rows: [
+            {
+              order_id: 101,
+              customer_id: 1,
+              amount: 120.0,
+            },
+            {
+              order_id: 102,
+              customer_id: 2,
+              amount: 300.0,
+            },
+            {
+              order_id: 103,
+              customer_id: 1,
+              amount: 200.0,
+            },
+            {
+              order_id: 104,
+              customer_id: 3,
+              amount: 50.0,
+            },
+            {
+              order_id: 105,
+              customer_id: 2,
+              amount: 100.0,
+            },
+          ],
+        },
+      ],
+    },
+
+    validation: {
+      type: "result",
+      orderMatters: false,
+
+      expectedResult: [
+        {
+          customer_name: "Aarav",
+          total_spent: 320.0,
+        },
+        {
+          customer_name: "Meera",
+          total_spent: 400.0,
+        },
+      ],
+    },
+  },
+
+  {
+    id: "pyspark-top-products-by-category",
+    title: "Top Products by Category",
+    description:
+      "Rank products within each category by revenue with a window function and keep the top 2. Assign the answer to `result`.",
+    difficulty: "Hard",
+    questionType: "PySpark",
+    category: "Window Functions",
+    languages: ["PySpark"],
+    tags: ["WINDOW", "ROW_NUMBER"],
+    companies: ["Meta"],
+    solved: false,
+
+    starterCode: `from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+
+sales = spark.createDataFrame(
+    [
+        ("Laptop", "Electronics", 5000),
+        ("Phone", "Electronics", 7000),
+        ("Tablet", "Electronics", 3000),
+        ("Desk", "Furniture", 4500),
+        ("Chair", "Furniture", 2000),
+        ("Lamp", "Furniture", 800),
+    ],
+    ["product", "category", "revenue"],
+)
+
+# TODO: rank products within each category by revenue
+# (highest first) and keep rank 2 or better.
+# Assign the final DataFrame to \`result\` with columns
+# product, category, revenue and rank.
+result = sales`,
+
+    database: {
+      engine: "PostgreSQL",
+
+      tables: [
+        {
+          name: "sales",
+
+          columns: [
+            {
+              name: "product",
+              type: "TEXT",
+              nullable: false,
+            },
+            {
+              name: "category",
+              type: "TEXT",
+              nullable: false,
+            },
+            {
+              name: "revenue",
+              type: "INTEGER",
+              nullable: false,
+            },
+          ],
+
+          rows: [
+            {
+              product: "Laptop",
+              category: "Electronics",
+              revenue: 5000,
+            },
+            {
+              product: "Phone",
+              category: "Electronics",
+              revenue: 7000,
+            },
+            {
+              product: "Tablet",
+              category: "Electronics",
+              revenue: 3000,
+            },
+            {
+              product: "Desk",
+              category: "Furniture",
+              revenue: 4500,
+            },
+            {
+              product: "Chair",
+              category: "Furniture",
+              revenue: 2000,
+            },
+            {
+              product: "Lamp",
+              category: "Furniture",
+              revenue: 800,
+            },
+          ],
+        },
+      ],
+    },
+
+    validation: {
+      type: "result",
+      orderMatters: false,
+
+      expectedResult: [
+        {
+          product: "Phone",
+          category: "Electronics",
+          revenue: 7000,
+          rank: 1,
+        },
+        {
+          product: "Laptop",
+          category: "Electronics",
+          revenue: 5000,
+          rank: 2,
+        },
+        {
+          product: "Desk",
+          category: "Furniture",
+          revenue: 4500,
+          rank: 1,
+        },
+        {
+          product: "Chair",
+          category: "Furniture",
+          revenue: 2000,
+          rank: 2,
+        },
+      ],
+    },
+  },
 ];

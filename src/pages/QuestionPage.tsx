@@ -45,10 +45,7 @@ import {
 } from "../lib/attempts";
 import type { QuestionAttempt } from "../lib/attempts";
 import { createQuestionDatabase } from "../lib/pglite";
-import {
-  buildPysparkSnippet,
-  PysparkClient,
-} from "../lib/pysparkClient";
+import { PysparkClient } from "../lib/pysparkClient";
 import {
   isQuestionSolved,
   markQuestionSolved,
@@ -365,8 +362,6 @@ function QuestionPage() {
     useState("");
   const [pysparkOutput, setPysparkOutput] =
     useState("");
-  const [pysparkError, setPysparkError] =
-    useState("");
 
   const pysparkClientRef =
     useRef<PysparkClient | null>(null);
@@ -451,7 +446,6 @@ function QuestionPage() {
     setPysparkStatus("idle");
     setPysparkDetail("");
     setPysparkOutput("");
-    setPysparkError("");
 
     setAttempts(
       question && !isPreview
@@ -656,7 +650,6 @@ function QuestionPage() {
     setPysparkStatus("idle");
     setPysparkDetail("");
     setPysparkOutput("");
-    setPysparkError("");
   };
 
   const runPySpark = async () => {
@@ -667,18 +660,27 @@ function QuestionPage() {
       return;
     }
 
-    if (!sql.trim()) {
-      setPysparkStatus("error");
-      setPysparkDetail("");
-      setPysparkOutput("");
-      setPysparkError(
-        "Write some PySpark code first.",
-      );
+    const currentQuestion = question;
+
+    if (!currentQuestion) {
+      setError("Question not found.");
+      setExecutionStatus("error");
       return;
     }
 
+    if (!sql.trim()) {
+      setError("Write some PySpark code first.");
+      setExecutionStatus("error");
+      return;
+    }
+
+    setExecutionStatus("running");
+    setError("");
+    setRows([]);
+    setExecutionTime(null);
+    setValidationMessage("");
+    setIsCorrect(null);
     setPysparkOutput("");
-    setPysparkError("");
 
     let client = pysparkClientRef.current;
 
@@ -707,32 +709,117 @@ function QuestionPage() {
         "Executing on real Spark 4.2.0 ...",
       );
 
-      const stdout = await client.run(
-        buildPysparkSnippet(sql),
-      );
+      const startTime = performance.now();
+      const outcome = await client.runValidation(sql);
+      const elapsed = performance.now() - startTime;
 
       if (pysparkClientRef.current !== client) {
         return;
       }
 
-      setPysparkOutput(
-        stdout.trim() === ""
-          ? "(no output)"
-          : stdout,
-      );
-      setPysparkStatus("success");
+      if (!outcome.ok) {
+        setError(outcome.error);
+        setExecutionTime(elapsed);
+        setExecutionStatus("error");
+        setValidationMessage("");
+        setIsCorrect(null);
+        setPysparkStatus("idle");
+        setPysparkDetail("");
+
+        if (currentQuestion && !isPreview) {
+          setAttempts(
+            recordAttempt(currentQuestion.id, {
+              executedSuccessfully: false,
+              isCorrect: false,
+              rowCount: 0,
+              executionTimeMs: elapsed,
+            }),
+          );
+        }
+        return;
+      }
+
+      setPysparkOutput(outcome.userStdout);
+      setPysparkStatus("idle");
       setPysparkDetail("");
+
+      const records = outcome.hasResult
+        ? outcome.records
+        : [];
+      setRows(records);
+      setExecutionTime(elapsed);
+      setExecutionStatus("success");
+
+      let attemptCorrect = false;
+
+      if (
+        currentQuestion.validation?.type ===
+        "result"
+      ) {
+        if (!outcome.hasResult) {
+          setIsCorrect(false);
+          setValidationMessage(
+            "Your code ran, but no `result` DataFrame was produced. Assign the final answer to `result`.",
+          );
+        } else {
+          const validation = validateResult(
+            records,
+            currentQuestion.validation.expectedResult,
+            currentQuestion.validation.orderMatters ??
+              false,
+          );
+
+          setIsCorrect(validation.correct);
+          setValidationMessage(
+            validation.message,
+          );
+
+          attemptCorrect = validation.correct;
+
+          if (validation.correct && !isPreview) {
+            markQuestionSolved(
+              currentQuestion.id,
+            );
+
+            setIsSolved(true);
+          }
+        }
+      }
+
+      if (!isPreview) {
+        setAttempts(
+          recordAttempt(currentQuestion.id, {
+            executedSuccessfully: true,
+            isCorrect: attemptCorrect,
+            rowCount: records.length,
+            executionTimeMs: elapsed,
+          }),
+        );
+      }
     } catch (e) {
       if (pysparkClientRef.current !== client) {
         return;
       }
 
-      setPysparkStatus("error");
-      setPysparkDetail("");
-      setPysparkOutput("");
-      setPysparkError(
+      setError(
         e instanceof Error ? e.message : String(e),
       );
+      setExecutionStatus("error");
+      setValidationMessage("");
+      setIsCorrect(null);
+      setPysparkStatus("idle");
+      setPysparkDetail("");
+
+      if (currentQuestion && !isPreview) {
+        setAttempts(
+          recordAttempt(currentQuestion.id, {
+            executedSuccessfully: false,
+            isCorrect: false,
+            rowCount: 0,
+            executionTimeMs: null,
+          }),
+        );
+      }
     }
   };
 
@@ -1229,7 +1316,7 @@ function QuestionPage() {
                   </span>
                 </div>
 
-                {isPySpark ? (
+                {isPySpark && (
                   <>
                     {(pysparkStatus === "booting" ||
                       pysparkStatus === "running") && (
@@ -1246,55 +1333,20 @@ function QuestionPage() {
                       </div>
                     )}
 
-                    {pysparkStatus === "success" && (
-                      <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2
-                            size={16}
-                            className="text-emerald-600"
-                          />
+                    {executionStatus === "success" &&
+                      pysparkOutput.trim() !== "" && (
+                        <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                          <p className="text-xs font-semibold text-gray-500">
+                            Program output
+                          </p>
 
-                          <span className="text-xs font-semibold text-emerald-700">
-                            Spark execution succeeded
-                          </span>
+                          <pre className="mt-2 whitespace-pre-wrap font-mono text-xs leading-5 text-gray-600">
+                            {pysparkOutput}
+                          </pre>
                         </div>
-
-                        <pre className="mt-2 whitespace-pre-wrap font-mono text-xs leading-5 text-emerald-700">
-                          {pysparkOutput}
-                        </pre>
-                      </div>
-                    )}
-
-                    {pysparkStatus === "error" && (
-                      <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4">
-                        <div className="flex items-center gap-2">
-                          <XCircle
-                            size={16}
-                            className="text-red-600"
-                          />
-
-                          <span className="text-xs font-semibold text-red-700">
-                            PySpark run failed
-                          </span>
-                        </div>
-
-                        <pre className="mt-2 whitespace-pre-wrap font-mono text-xs leading-5 text-red-600">
-                          {pysparkError}
-                        </pre>
-                      </div>
-                    )}
-
-                    {pysparkStatus === "idle" && (
-                      <div className="mt-4 flex min-h-[120px] items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 text-center">
-                        <p className="text-xs text-gray-400">
-                          Run your PySpark code to see
-                          the Spark result.
-                        </p>
-                      </div>
-                    )}
+                      )}
                   </>
-                ) : (
-                  <>
+                )}
                     {executionStatus === "success" && (
                       <div
                     className={`mt-4 rounded-lg border px-4 py-3 ${
@@ -1472,8 +1524,6 @@ function QuestionPage() {
                     )
                   )}
                 </div>
-                  </>
-                )}
               </div>
             </section>
           </div>
