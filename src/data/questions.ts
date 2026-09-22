@@ -57,6 +57,12 @@ export type Question = {
 
   starterCode?: string;
 
+  hint?: string;
+
+  solutionCode?: string;
+
+  explanation?: string;
+
   validation?: QuestionValidation;
 };
 
@@ -2936,6 +2942,26 @@ ORDER BY salary DESC;`,
     companies: ["Meta"],
     solved: false,
 
+    hint: "Group the orders by customer_id, then combine each group with a sum on amount.",
+    solutionCode: `from pyspark.sql import functions as F
+
+orders = spark.createDataFrame(
+    [
+        (1, 1, 250.0),
+        (2, 2, 100.0),
+        (3, 1, 75.0),
+        (4, 3, 300.0),
+        (5, 2, 150.0),
+    ],
+    ["order_id", "customer_id", "amount"],
+)
+
+result = (
+    orders.groupBy("customer_id").agg(F.sum("amount").alias("total_revenue"))
+)`,
+    explanation:
+      "Grouping collapses many rows into one row per key. Here groupBy customer_id partitions the orders, and the sum aggregation folds each partition into a single total, so every customer appears exactly once with their combined revenue.",
+
     starterCode: `from pyspark.sql import functions as F
 
 orders = spark.createDataFrame(
@@ -3043,6 +3069,39 @@ result = orders`,
     tags: ["JOIN", "GROUPBY", "FILTER"],
     companies: ["Meta"],
     solved: false,
+
+    hint: "Join on the shared key first, then aggregate spend per customer name and keep only the big spenders.",
+    solutionCode: `from pyspark.sql import functions as F
+
+customers = spark.createDataFrame(
+    [
+        (1, "Aarav"),
+        (2, "Meera"),
+        (3, "Rohan"),
+    ],
+    ["customer_id", "customer_name"],
+)
+
+orders = spark.createDataFrame(
+    [
+        (101, 1, 120.0),
+        (102, 2, 300.0),
+        (103, 1, 200.0),
+        (104, 3, 50.0),
+        (105, 2, 100.0),
+    ],
+    ["order_id", "customer_id", "amount"],
+)
+
+joined = orders.join(customers, "customer_id")
+
+totals = joined.groupBy("customer_name").agg(
+    F.sum("amount").alias("total_spent")
+)
+
+result = totals.filter("total_spent > 250")`,
+    explanation:
+      "Joining on customer_id attaches each order to its customer. Aggregating after the join summarizes at the customer level, and filtering on the aggregated column keeps only high spenders. Joining on a column name directly also avoids carrying two copies of the key.",
 
     starterCode: `from pyspark.sql import functions as F
 
@@ -3189,6 +3248,33 @@ result = customers`,
     companies: ["Meta"],
     solved: false,
 
+    hint: "Number the rows inside each category by revenue, then keep the rows numbered 1 or 2.",
+    solutionCode: `from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+
+sales = spark.createDataFrame(
+    [
+        ("Laptop", "Electronics", 5000),
+        ("Phone", "Electronics", 7000),
+        ("Tablet", "Electronics", 3000),
+        ("Desk", "Furniture", 4500),
+        ("Chair", "Furniture", 2000),
+        ("Lamp", "Furniture", 800),
+    ],
+    ["product", "category", "revenue"],
+)
+
+ranked = sales.withColumn(
+    "rank",
+    F.row_number().over(
+        Window.partitionBy("category").orderBy(F.desc("revenue"))
+    ),
+)
+
+result = ranked.filter("rank <= 2")`,
+    explanation:
+      "A window partitions rows without collapsing them, so every product keeps its own row while gaining a rank computed only against its category peers. Ordering the window by revenue descending puts the best seller first, and row_number hands out unbroken positions that a simple filter can then trim.",
+
     starterCode: `from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
@@ -3317,6 +3403,32 @@ result = sales`,
     companies: ["Meta"],
     solved: false,
 
+    hint: "Give every email group its own numbering ordered by customer_id, then keep number 1.",
+    solutionCode: `from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+
+customers = spark.createDataFrame(
+    [
+        (1, "Aarav", "aarav@example.com"),
+        (2, "Meera", "meera@example.com"),
+        (3, "Aarav Sharma", "aarav@example.com"),
+        (4, "Rohan", "rohan@example.com"),
+        (5, "Meera Iyer", "meera@example.com"),
+    ],
+    ["customer_id", "customer_name", "email"],
+)
+
+ranked = customers.withColumn(
+    "rn",
+    F.row_number().over(
+        Window.partitionBy("email").orderBy("customer_id")
+    ),
+)
+
+result = ranked.filter("rn = 1").drop("rn")`,
+    explanation:
+      "Deterministic deduplication needs an explicit tiebreaker, not just first-seen order. Partitioning by email and ordering by customer_id turns each duplicate set into a ranked list where position 1 is always the smallest id, so the same rows survive on every run. Dropping the helper column leaves the original shape intact.",
+
     starterCode: `from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
@@ -3431,6 +3543,21 @@ result = customers`,
     companies: ["Meta"],
     solved: false,
 
+    hint: "Replace nulls in one column with a default value.",
+    solutionCode: `users = spark.createDataFrame(
+    [
+        (1, "Aarav", "Mumbai"),
+        (2, "Meera", None),
+        (3, "Rohan", "Delhi"),
+        (4, "Ananya", None),
+    ],
+    ["user_id", "username", "city"],
+)
+
+result = users.fillna({"city": "Unknown"})`,
+    explanation:
+      "Null means unknown, and most downstream logic treats it as contagious — one null can blank an entire result. Filling a column with an explicit default keeps the rows while making the missing data visible and safe to group, join, or display.",
+
     starterCode: `from pyspark.sql import functions as F
 
 users = spark.createDataFrame(
@@ -3538,6 +3665,29 @@ result = users`,
     tags: ["DATE", "MONTH", "GROUPBY"],
     companies: ["Meta"],
     solved: false,
+
+    hint: "Derive the month from each date, then aggregate revenue per month.",
+    solutionCode: `from pyspark.sql import functions as F
+
+orders = spark.createDataFrame(
+    [
+        (101, "2026-01-05", 200.0),
+        (102, "2026-01-18", 350.0),
+        (103, "2026-02-02", 400.0),
+        (104, "2026-02-20", 150.0),
+        (105, "2026-03-10", 900.0),
+        (106, "2026-03-22", 250.0),
+    ],
+    ["order_id", "order_date", "amount"],
+)
+
+result = (
+    orders.withColumn("month", F.month(F.to_date("order_date")))
+    .groupBy("month")
+    .agg(F.sum("amount").alias("revenue"))
+)`,
+    explanation:
+      "Raw dates are too fine-grained to summarize, so the pattern is derive-then-group: first compute a coarser month value from each date, then aggregate per month. Parsing the text into a real date first keeps month extraction correct regardless of string formatting.",
 
     starterCode: `from pyspark.sql import functions as F
 
@@ -3652,6 +3802,29 @@ result = orders`,
     tags: ["WINDOW", "CUMULATIVE-SUM"],
     companies: ["Meta"],
     solved: false,
+
+    hint: "Define a window ordered by date that grows row by row, then sum over it.",
+    solutionCode: `from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+
+sales = spark.createDataFrame(
+    [
+        (1, "2026-03-01", 1200.0),
+        (2, "2026-03-01", 850.0),
+        (3, "2026-03-02", 1450.0),
+        (4, "2026-03-03", 980.0),
+        (5, "2026-03-04", 1750.0),
+    ],
+    ["sale_id", "sale_date", "amount"],
+)
+
+running = Window.orderBy("sale_date", "sale_id").rowsBetween(
+    Window.unboundedPreceding, Window.currentRow
+)
+
+result = sales.withColumn("running_total", F.sum("amount").over(running))`,
+    explanation:
+      "A running total is a window whose frame starts at the first row and ends at the current row, so each row sums everything up to itself. Ordering by date plus the id tiebreaker makes the sequence deterministic even when several sales share a date.",
 
     starterCode: `from pyspark.sql import functions as F
 from pyspark.sql.window import Window
@@ -3780,6 +3953,35 @@ result = sales`,
     tags: ["DENSE_RANK", "PARTITION"],
     companies: ["Meta"],
     solved: false,
+
+    hint: "Rank inside each department with a function that shares ranks on ties.",
+    solutionCode: `from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+
+employees = spark.createDataFrame(
+    [
+        (1, "Aarav", "Engineering", 125000),
+        (2, "Meera", "Engineering", 142000),
+        (3, "Rohan", "Engineering", 142000),
+        (4, "Ananya", "Finance", 110000),
+        (5, "Vikram", "Finance", 132000),
+        (6, "Ishita", "Finance", 110000),
+    ],
+    ["employee_id", "employee_name", "department", "salary"],
+)
+
+ranked = employees.withColumn(
+    "salary_rank",
+    F.dense_rank().over(
+        Window.partitionBy("department").orderBy(F.desc("salary"))
+    ),
+)
+
+result = ranked.select(
+    "employee_name", "department", "salary", "salary_rank"
+)`,
+    explanation:
+      "Ranking functions differ only in how they treat ties: row_number always invents distinct positions, while dense_rank hands tied salaries the same rank without leaving gaps. Partitioning restarts the ranking per department, and selecting the final columns keeps the answer shape exact.",
 
     starterCode: `from pyspark.sql import functions as F
 from pyspark.sql.window import Window
@@ -3932,6 +4134,30 @@ result = employees`,
     companies: ["Meta"],
     solved: false,
 
+    hint: "Map each amount to a label with ordered conditions, highest band first.",
+    solutionCode: `from pyspark.sql import functions as F
+
+orders = spark.createDataFrame(
+    [
+        (101, 250.0),
+        (102, 1800.0),
+        (103, 3200.0),
+        (104, 950.0),
+        (105, 4200.0),
+        (106, 1500.0),
+    ],
+    ["order_id", "amount"],
+)
+
+result = orders.withColumn(
+    "segment",
+    F.when(F.col("amount") >= 3000, "Premium")
+    .when(F.col("amount") >= 1000, "Standard")
+    .otherwise("Basic"),
+)`,
+    explanation:
+      "Conditional columns evaluate their branches in order and take the first match, so listing bands from highest to lowest guarantees each amount lands in exactly one segment. Otherwise acts as the safety net for everything the earlier conditions skipped.",
+
     starterCode: `from pyspark.sql import functions as F
 
 orders = spark.createDataFrame(
@@ -4053,6 +4279,29 @@ result = orders`,
     tags: ["FILTER", "ISNOTNULL"],
     companies: ["Meta"],
     solved: false,
+
+    hint: "Keep rows only when the amount exists, is positive, and the status is complete.",
+    solutionCode: `from pyspark.sql import functions as F
+
+transactions = spark.createDataFrame(
+    [
+        (1, 250.0, "complete"),
+        (2, None, "complete"),
+        (3, -50.0, "complete"),
+        (4, 300.0, None),
+        (5, 0.0, "pending"),
+        (6, 120.0, "complete"),
+    ],
+    ["transaction_id", "amount", "status"],
+)
+
+result = transactions.filter(
+    F.col("amount").isNotNull()
+    & (F.col("amount") > 0)
+    & (F.col("status") == "complete")
+)`,
+    explanation:
+      "Data-quality filters combine independent checks with AND so a row must pass every rule: present, positive, and complete. Note that null comparisons never match, which is why the null check must come first — without it, bad rows would silently slip through or vanish for the wrong reason.",
 
     starterCode: `from pyspark.sql import functions as F
 

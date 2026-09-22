@@ -10,6 +10,7 @@ import {
   Eye,
   EyeOff,
   History,
+  Lightbulb,
   Loader2,
   Play,
   RotateCcw,
@@ -440,10 +441,24 @@ function QuestionPage() {
 
   const copyTimeoutRef = useRef<number | null>(null);
 
+  const [showSolution, setShowSolution] =
+    useState(false);
+  const [solutionCopied, setSolutionCopied] =
+    useState(false);
+
+  const solutionCopyTimeoutRef =
+    useRef<number | null>(null);
+
   useEffect(() => {
     return () => {
       if (copyTimeoutRef.current !== null) {
         window.clearTimeout(copyTimeoutRef.current);
+      }
+
+      if (solutionCopyTimeoutRef.current !== null) {
+        window.clearTimeout(
+          solutionCopyTimeoutRef.current,
+        );
       }
     };
   }, []);
@@ -468,6 +483,8 @@ function QuestionPage() {
     setValidationMessage("");
     setIsCorrect(null);
     setIsCopied(false);
+    setShowSolution(false);
+    setSolutionCopied(false);
 
     pysparkClientRef.current?.dispose();
     pysparkClientRef.current = null;
@@ -869,6 +886,33 @@ function QuestionPage() {
     }
   };
 
+  const copySolution = async () => {
+    if (!question?.solutionCode) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(
+        question.solutionCode,
+      );
+
+      setSolutionCopied(true);
+
+      if (solutionCopyTimeoutRef.current !== null) {
+        window.clearTimeout(
+          solutionCopyTimeoutRef.current,
+        );
+      }
+
+      solutionCopyTimeoutRef.current =
+        window.setTimeout(() => {
+          setSolutionCopied(false);
+        }, 1800);
+    } catch {
+      setSolutionCopied(false);
+    }
+  };
+
   const previewTableRows = async (
     tableName: string,
   ): Promise<Record<string, unknown>[]> => {
@@ -1105,6 +1149,102 @@ function QuestionPage() {
                     onPreviewRows={previewTableRows}
                   />
                 ))}
+              </div>
+            </section>
+          )}
+
+          {(question.hint ||
+            question.solutionCode ||
+            question.explanation) && (
+            <section className="mt-6 rounded-xl border border-gray-200 bg-white shadow-sm">
+              <div className="border-b border-gray-100 px-5 py-4">
+                <h2 className="font-semibold text-gray-900">
+                  Learning help
+                </h2>
+              </div>
+
+              <div className="space-y-4 p-5">
+                {question.hint && (
+                  <div className="flex items-start gap-2 rounded-lg bg-amber-50 px-4 py-3">
+                    <Lightbulb
+                      size={15}
+                      className="mt-0.5 shrink-0 text-amber-600"
+                    />
+
+                    <p className="text-xs leading-5 text-amber-700">
+                      <span className="font-semibold">
+                        Hint:{" "}
+                      </span>
+                      {question.hint}
+                    </p>
+                  </div>
+                )}
+
+                {question.solutionCode && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShowSolution(
+                          (previous) => !previous,
+                        )
+                      }
+                      className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                    >
+                      {showSolution ? (
+                        <EyeOff size={14} />
+                      ) : (
+                        <Eye size={14} />
+                      )}
+                      {showSolution
+                        ? "Hide Solution"
+                        : "Show Solution"}
+                    </button>
+
+                    {showSolution && (
+                      <div className="mt-3 overflow-hidden rounded-lg border border-gray-200">
+                        <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-4 py-2">
+                          <span className="text-xs font-medium text-gray-500">
+                            Solution
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void copySolution()
+                            }
+                            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-gray-500 hover:bg-gray-200 hover:text-gray-700"
+                          >
+                            {solutionCopied ? (
+                              <Check size={13} />
+                            ) : (
+                              <Copy size={13} />
+                            )}
+                            {solutionCopied
+                              ? "Copied"
+                              : "Copy"}
+                          </button>
+                        </div>
+
+                        <pre className="overflow-auto bg-gray-950 p-4 font-mono text-xs leading-5 text-gray-100">
+                          {question.solutionCode}
+                        </pre>
+
+                        {question.explanation && (
+                          <div className="border-t border-gray-100 bg-white px-4 py-3">
+                            <p className="text-xs font-semibold text-gray-700">
+                              Explanation
+                            </p>
+
+                            <p className="mt-1 text-xs leading-5 text-gray-500">
+                              {question.explanation}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </section>
           )}
