@@ -352,14 +352,42 @@ function QuestionPage() {
   type PysparkStatus =
     | "idle"
     | "booting"
-    | "running"
-    | "success"
-    | "error";
+    | "running";
 
   const [pysparkStatus, setPysparkStatus] =
     useState<PysparkStatus>("idle");
   const [pysparkDetail, setPysparkDetail] =
     useState("");
+  const [pysparkElapsedSec, setPysparkElapsedSec] =
+    useState(0);
+
+  const pysparkTimerActiveRef = useRef(false);
+
+  useEffect(() => {
+    const active =
+      pysparkStatus === "booting" ||
+      pysparkStatus === "running";
+
+    if (!active) {
+      pysparkTimerActiveRef.current = false;
+      return;
+    }
+
+    if (!pysparkTimerActiveRef.current) {
+      pysparkTimerActiveRef.current = true;
+      setPysparkElapsedSec(0);
+    }
+
+    const interval = setInterval(() => {
+      setPysparkElapsedSec(
+        (previous) => previous + 1,
+      );
+    }, 1000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [pysparkStatus]);
   const [pysparkOutput, setPysparkOutput] =
     useState("");
 
@@ -1328,7 +1356,9 @@ function QuestionPage() {
 
                         <p className="text-xs text-gray-500">
                           {pysparkDetail ||
-                            "Starting PySpark ..."}
+                            "Starting PySpark ..."}{" "}
+                          · {pysparkElapsedSec}s
+                          elapsed
                         </p>
                       </div>
                     )}
