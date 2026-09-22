@@ -11,7 +11,11 @@ import {
 
 import { Link } from "react-router-dom";
 
-import { installBridge } from "../lib/pysparkBridge";
+import {
+  buildPysparkSnippet,
+  PysparkClient,
+} from "../lib/pysparkClient";
+import type { PysparkBootStage } from "../lib/pysparkClient";
 
 type Stage =
   | "idle"
@@ -34,49 +38,13 @@ const STAGE_LABEL: Record<Stage, string> = {
   error: "Error",
 };
 
-const TEST_SNIPPET = [
+const TEST_BODY = [
   "import json",
-  "import sys",
-  "import importlib.machinery",
-  // Pyodide's runPythonAsync behaves like `python -c` (__main__ has no
-  // __spec__ and no __file__), which makes pyspark's check_dependencies()
-  // take its doctest-skip branch and abort. Pretend we run from a file so
-  // the normal dependency checks run instead.
-  "_main = sys.modules['__main__']",
-  "if getattr(_main, '__spec__', None) is None and not hasattr(_main, '__file__'):",
-  "    _main.__spec__ = importlib.machinery.ModuleSpec('__main__', loader=None)",
-  "import pyspark_connect_web as pcw",
-  "pcw.install()",
-  // Backport of the upstream reattach-pool fix (present on upstream main,
-  // missing from the pinned 0.2.0 wheel): Pyodide cannot start OS threads,
-  // so ReleaseExecute cleanup must be a no-op future. In pyspark-client
-  // 4.2.0 the pool lives behind the _release_thread_pool property backed
-  // by the _release_thread_pool_instance class slot, so pre-seeding that
-  // slot avoids any thread creation. Without this, .collect() dies with
-  // "can't start new thread" even when transport works.
-  "from concurrent.futures import Future",
-  "import pyspark.sql.connect.client.reattach as _reattach",
-  "class _NoopPool:",
-  "    def submit(self, fn, *a, **k):",
-  "        _f = Future(); _f.set_result(None); return _f",
-  "    def shutdown(self, *a, **k):",
-  "        pass",
-  "_reattach.ExecutePlanResponseReattachableIterator._release_thread_pool_instance = _NoopPool()",
-  "from pyspark.sql import SparkSession",
-  'spark = SparkSession.builder.remote("sc://localhost:8081/;transport=grpcweb").getOrCreate()',
   "rows = spark.range(5).collect()",
   'print(json.dumps({"connected": True, "rows": [r[0] for r in rows]}))',
 ].join("\n");
 
-type WorkerMessage = {
-  type?: string;
-  id?: number;
-  stage?: string;
-  message?: string;
-  result?: string;
-  control?: SharedArrayBuffer;
-  data?: SharedArrayBuffer;
-};
+const TEST_SNIPPET = buildPysparkSnippet(TEST_BODY);
 
 function PySparkTestPage() {
   const [stage, setStage] = useState<Stage>("idle");
@@ -86,7 +54,9 @@ function PySparkTestPage() {
   );
   const [error, setError] = useState("");
 
-  const workerRef = useRef<Worker | null>(null);
+  const workerRef = useRef<PysparkClient | null>(
+    null,
+  );
   const runRef = useRef<
     ((code: string) => Promise<string>) | null
   >(null);
@@ -141,107 +111,36 @@ function PySparkTestPage() {
   }, [fail]);
 
   useEffect(() => {
-    if (typeof SharedArrayBuffer === "undefined") {
-      fail(
-        "SharedArrayBuffer is unavailable in this browser.",
-      );
-      return;
-    }
-
-    if (window.crossOriginIsolated !== true) {
-      fail(
-        "Page is not cross-origin isolated (need COOP: same-origin and COEP: credentialless).",
-      );
-      return;
-    }
-
     let disposed = false;
-    let seq = 0;
-    const pending = new Map<
-      number,
+
+    const stageDetail: Record<PysparkBootStage, string> =
       {
-        resolve: (value: string) => void;
-        reject: (reason: Error) => void;
-      }
-    >();
-
-    const worker = new Worker(
-      "/worker/pyspark-test-worker.js",
-      { type: "module" },
-    );
-    workerRef.current = worker;
-    installBridge(worker);
-
-    worker.addEventListener("error", (ev: ErrorEvent) => {
-      if (!disposed) {
-        fail(
-          `Web Worker failed to start: ${ev.message || "unknown worker error"}`,
-        );
-      }
-    });
-
-    const ready = new Promise<void>((resolve, reject) => {
-      const onMessage = (ev: MessageEvent) => {
-        const msg = (ev.data || {}) as WorkerMessage;
-
-        if (msg.type === "pcw_ready") {
-          worker.removeEventListener(
-            "message",
-            onMessage,
-          );
-          resolve();
-        } else if (msg.type === "pcw_error") {
-          worker.removeEventListener(
-            "message",
-            onMessage,
-          );
-          reject(
-            new Error(msg.message ?? "Worker failed to boot"),
-          );
-        } else if (msg.type === "pcw_status") {
-          if (msg.stage === "python") {
-            setStage("python");
-          } else if (
-            msg.stage === "packages" ||
-            msg.stage === "wheels"
-          ) {
-            setStage("packages");
-          }
-          setDetail(msg.message ?? "");
-        }
+        python: "Loading Pyodide runtime ...",
+        packages: "Loading pandas / pyarrow / numpy ...",
+        wheels: "Installing PySpark Connect client ...",
       };
-      worker.addEventListener("message", onMessage);
-    });
 
-    worker.addEventListener("message", (ev: MessageEvent) => {
-      const msg = (ev.data || {}) as WorkerMessage;
+    const client = new PysparkClient(
+      (bootStage, message) => {
+        if (disposed) {
+          return;
+        }
 
-      if (
-        msg.type === "pcw_result" &&
-        msg.id !== undefined &&
-        pending.has(msg.id)
-      ) {
-        pending.get(msg.id)?.resolve(msg.result ?? "");
-        pending.delete(msg.id);
-      } else if (
-        msg.type === "pcw_run_error" &&
-        msg.id !== undefined &&
-        pending.has(msg.id)
-      ) {
-        pending
-          .get(msg.id)
-          ?.reject(new Error(msg.message ?? "Python run failed"));
-        pending.delete(msg.id);
-      }
-    });
+        setStage("packages");
 
-    runRef.current = (code: string) => {
-      const id = ++seq;
-      return new Promise<string>((resolve, reject) => {
-        pending.set(id, { resolve, reject });
-        worker.postMessage({ type: "pcw_run", id, code });
-      });
-    };
+        if (bootStage === "python") {
+          setStage("python");
+        }
+
+        setDetail(
+          message || stageDetail[bootStage],
+        );
+      },
+    );
+    workerRef.current = client;
+
+    runRef.current = (code: string) =>
+      client.run(code);
 
     const boot = async () => {
       setStage("starting");
@@ -249,8 +148,7 @@ function PySparkTestPage() {
       setRows(null);
       setError("");
 
-      worker.postMessage({ type: "pcw_boot" });
-      await ready;
+      await client.boot();
 
       if (!disposed) {
         await runTest();
@@ -265,9 +163,8 @@ function PySparkTestPage() {
 
     return () => {
       disposed = true;
-      pending.clear();
       runRef.current = null;
-      worker.terminate();
+      client.dispose();
       workerRef.current = null;
     };
   }, [fail, runTest]);

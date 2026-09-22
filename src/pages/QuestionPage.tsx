@@ -46,6 +46,10 @@ import {
 import type { QuestionAttempt } from "../lib/attempts";
 import { createQuestionDatabase } from "../lib/pglite";
 import {
+  buildPysparkSnippet,
+  PysparkClient,
+} from "../lib/pysparkClient";
+import {
   isQuestionSolved,
   markQuestionSolved,
 } from "../lib/progress";
@@ -345,6 +349,28 @@ function QuestionPage() {
 
   const database = question?.database;
 
+  const isPySpark =
+    question?.questionType === "PySpark";
+
+  type PysparkStatus =
+    | "idle"
+    | "booting"
+    | "running"
+    | "success"
+    | "error";
+
+  const [pysparkStatus, setPysparkStatus] =
+    useState<PysparkStatus>("idle");
+  const [pysparkDetail, setPysparkDetail] =
+    useState("");
+  const [pysparkOutput, setPysparkOutput] =
+    useState("");
+  const [pysparkError, setPysparkError] =
+    useState("");
+
+  const pysparkClientRef =
+    useRef<PysparkClient | null>(null);
+
   const [sql, setSql] = useState(
     question?.starterCode ??
       "-- Write your solution here",
@@ -400,6 +426,13 @@ function QuestionPage() {
   }, []);
 
   useEffect(() => {
+    return () => {
+      pysparkClientRef.current?.dispose();
+      pysparkClientRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
     setSql(
       question?.starterCode ??
         "-- Write your solution here",
@@ -412,6 +445,13 @@ function QuestionPage() {
     setValidationMessage("");
     setIsCorrect(null);
     setIsCopied(false);
+
+    pysparkClientRef.current?.dispose();
+    pysparkClientRef.current = null;
+    setPysparkStatus("idle");
+    setPysparkDetail("");
+    setPysparkOutput("");
+    setPysparkError("");
 
     setAttempts(
       question && !isPreview
@@ -612,6 +652,88 @@ function QuestionPage() {
     setExecutionTime(null);
     setValidationMessage("");
     setIsCorrect(null);
+
+    setPysparkStatus("idle");
+    setPysparkDetail("");
+    setPysparkOutput("");
+    setPysparkError("");
+  };
+
+  const runPySpark = async () => {
+    if (
+      pysparkStatus === "booting" ||
+      pysparkStatus === "running"
+    ) {
+      return;
+    }
+
+    if (!sql.trim()) {
+      setPysparkStatus("error");
+      setPysparkDetail("");
+      setPysparkOutput("");
+      setPysparkError(
+        "Write some PySpark code first.",
+      );
+      return;
+    }
+
+    setPysparkOutput("");
+    setPysparkError("");
+
+    let client = pysparkClientRef.current;
+
+    try {
+      if (!client) {
+        client = new PysparkClient(
+          (_stage, message) => {
+            setPysparkStatus("booting");
+            setPysparkDetail(message);
+          },
+        );
+        pysparkClientRef.current = client;
+
+        setPysparkStatus("booting");
+        setPysparkDetail("Starting Web Worker ...");
+
+        await client.boot();
+      }
+
+      if (pysparkClientRef.current !== client) {
+        return;
+      }
+
+      setPysparkStatus("running");
+      setPysparkDetail(
+        "Executing on real Spark 4.2.0 ...",
+      );
+
+      const stdout = await client.run(
+        buildPysparkSnippet(sql),
+      );
+
+      if (pysparkClientRef.current !== client) {
+        return;
+      }
+
+      setPysparkOutput(
+        stdout.trim() === ""
+          ? "(no output)"
+          : stdout,
+      );
+      setPysparkStatus("success");
+      setPysparkDetail("");
+    } catch (e) {
+      if (pysparkClientRef.current !== client) {
+        return;
+      }
+
+      setPysparkStatus("error");
+      setPysparkDetail("");
+      setPysparkOutput("");
+      setPysparkError(
+        e instanceof Error ? e.message : String(e),
+      );
+    }
   };
 
   const copySql = async () => {
@@ -967,19 +1089,25 @@ function QuestionPage() {
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
                 <div>
                   <h2 className="flex items-center gap-2 font-semibold text-gray-900">
-                    SQL Editor
+                    {isPySpark
+                      ? "PySpark Editor"
+                      : "SQL Editor"}
                     <span className="rounded-md bg-gray-100 px-2 py-0.5 font-mono text-xs font-medium text-gray-600">
-                      SQL
+                      {isPySpark ? "PySpark" : "SQL"}
                     </span>
                   </h2>
 
                   <p className="mt-1 text-xs text-gray-400">
-                    PostgreSQL runs directly in your browser.
+                    {isPySpark
+                      ? "Real Spark 4.2.0 execution in your browser."
+                      : "PostgreSQL runs directly in your browser."}
                   </p>
                 </div>
 
                 <span className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500">
-                  PostgreSQL
+                  {isPySpark
+                    ? "Spark Connect"
+                    : "PostgreSQL"}
                 </span>
               </div>
 
@@ -996,6 +1124,11 @@ function QuestionPage() {
                         event.metaKey)
                     ) {
                       event.preventDefault();
+
+                      if (isPySpark) {
+                        void runPySpark();
+                        return;
+                      }
 
                       if (
                         !isDatabaseReady ||
@@ -1015,18 +1148,34 @@ function QuestionPage() {
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={runQuery}
+                    onClick={
+                      isPySpark
+                        ? runPySpark
+                        : runQuery
+                    }
                     disabled={
-                      !isDatabaseReady ||
-                      executionStatus === "running"
+                      isPySpark
+                        ? pysparkStatus ===
+                            "booting" ||
+                          pysparkStatus === "running"
+                        : !isDatabaseReady ||
+                          executionStatus === "running"
                     }
                     className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-medium text-white transition ${
-                      executionStatus === "running"
+                      (isPySpark
+                        ? pysparkStatus === "running" ||
+                          pysparkStatus === "booting"
+                        : executionStatus ===
+                          "running")
                         ? "cursor-wait bg-gray-600"
                         : "bg-gray-900 hover:bg-gray-800"
                     } disabled:cursor-not-allowed disabled:opacity-50`}
                   >
-                    {executionStatus === "running" ? (
+                    {(isPySpark
+                      ? pysparkStatus === "running" ||
+                        pysparkStatus === "booting"
+                      : executionStatus ===
+                        "running") ? (
                       <Loader2
                         size={14}
                         className="animate-spin"
@@ -1035,9 +1184,15 @@ function QuestionPage() {
                       <Play size={14} />
                     )}
 
-                    {executionStatus === "running"
-                      ? "Running..."
-                      : "Run Query"}
+                    {isPySpark
+                      ? pysparkStatus === "booting"
+                        ? "Starting Python..."
+                        : pysparkStatus === "running"
+                          ? "Running..."
+                          : "Run PySpark"
+                      : executionStatus === "running"
+                        ? "Running..."
+                        : "Run Query"}
                   </button>
 
                   <button
@@ -1062,7 +1217,11 @@ function QuestionPage() {
                     ) : (
                       <Copy size={14} />
                     )}
-                    {isCopied ? "Copied" : "Copy SQL"}
+                    {isCopied
+                      ? "Copied"
+                      : isPySpark
+                        ? "Copy Code"
+                        : "Copy SQL"}
                   </button>
 
                   <span className="ml-auto text-xs text-gray-400">
@@ -1070,8 +1229,74 @@ function QuestionPage() {
                   </span>
                 </div>
 
-                {executionStatus === "success" && (
-                  <div
+                {isPySpark ? (
+                  <>
+                    {(pysparkStatus === "booting" ||
+                      pysparkStatus === "running") && (
+                      <div className="mt-4 flex min-h-[120px] items-center justify-center gap-2 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 text-center">
+                        <Loader2
+                          size={14}
+                          className="animate-spin text-gray-400"
+                        />
+
+                        <p className="text-xs text-gray-500">
+                          {pysparkDetail ||
+                            "Starting PySpark ..."}
+                        </p>
+                      </div>
+                    )}
+
+                    {pysparkStatus === "success" && (
+                      <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2
+                            size={16}
+                            className="text-emerald-600"
+                          />
+
+                          <span className="text-xs font-semibold text-emerald-700">
+                            Spark execution succeeded
+                          </span>
+                        </div>
+
+                        <pre className="mt-2 whitespace-pre-wrap font-mono text-xs leading-5 text-emerald-700">
+                          {pysparkOutput}
+                        </pre>
+                      </div>
+                    )}
+
+                    {pysparkStatus === "error" && (
+                      <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4">
+                        <div className="flex items-center gap-2">
+                          <XCircle
+                            size={16}
+                            className="text-red-600"
+                          />
+
+                          <span className="text-xs font-semibold text-red-700">
+                            PySpark run failed
+                          </span>
+                        </div>
+
+                        <pre className="mt-2 whitespace-pre-wrap font-mono text-xs leading-5 text-red-600">
+                          {pysparkError}
+                        </pre>
+                      </div>
+                    )}
+
+                    {pysparkStatus === "idle" && (
+                      <div className="mt-4 flex min-h-[120px] items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 text-center">
+                        <p className="text-xs text-gray-400">
+                          Run your PySpark code to see
+                          the Spark result.
+                        </p>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {executionStatus === "success" && (
+                      <div
                     className={`mt-4 rounded-lg border px-4 py-3 ${
                       isCorrect
                         ? "border-emerald-200 bg-emerald-50"
@@ -1247,6 +1472,8 @@ function QuestionPage() {
                     )
                   )}
                 </div>
+                  </>
+                )}
               </div>
             </section>
           </div>
