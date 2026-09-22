@@ -3303,4 +3303,851 @@ result = sales`,
       ],
     },
   },
+
+  {
+    id: "pyspark-deduplicate-customer-emails",
+    title: "Deduplicate Customer Emails",
+    description:
+      "Remove duplicate customers keeping, for each email, the record with the smallest customer_id. Assign the answer to `result`.",
+    difficulty: "Easy",
+    questionType: "PySpark",
+    category: "Data Cleaning",
+    languages: ["PySpark"],
+    tags: ["DEDUPLICATION", "ROW_NUMBER"],
+    companies: ["Meta"],
+    solved: false,
+
+    starterCode: `from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+
+customers = spark.createDataFrame(
+    [
+        (1, "Aarav", "aarav@example.com"),
+        (2, "Meera", "meera@example.com"),
+        (3, "Aarav Sharma", "aarav@example.com"),
+        (4, "Rohan", "rohan@example.com"),
+        (5, "Meera Iyer", "meera@example.com"),
+    ],
+    ["customer_id", "customer_name", "email"],
+)
+
+# TODO: for each email keep only the record with the smallest
+# customer_id. Hint: use row_number over a Window partitioned
+# by email and ordered by customer_id ascending, then keep
+# rows where the row number equals 1.
+# Assign the final DataFrame to \`result\`.
+result = customers`,
+
+    database: {
+      engine: "PostgreSQL",
+
+      tables: [
+        {
+          name: "customers",
+
+          columns: [
+            {
+              name: "customer_id",
+              type: "INTEGER",
+              nullable: false,
+            },
+            {
+              name: "customer_name",
+              type: "TEXT",
+              nullable: false,
+            },
+            {
+              name: "email",
+              type: "TEXT",
+              nullable: false,
+            },
+          ],
+
+          rows: [
+            {
+              customer_id: 1,
+              customer_name: "Aarav",
+              email: "aarav@example.com",
+            },
+            {
+              customer_id: 2,
+              customer_name: "Meera",
+              email: "meera@example.com",
+            },
+            {
+              customer_id: 3,
+              customer_name: "Aarav Sharma",
+              email: "aarav@example.com",
+            },
+            {
+              customer_id: 4,
+              customer_name: "Rohan",
+              email: "rohan@example.com",
+            },
+            {
+              customer_id: 5,
+              customer_name: "Meera Iyer",
+              email: "meera@example.com",
+            },
+          ],
+        },
+      ],
+    },
+
+    validation: {
+      type: "result",
+      orderMatters: false,
+
+      expectedResult: [
+        {
+          customer_id: 1,
+          customer_name: "Aarav",
+          email: "aarav@example.com",
+        },
+        {
+          customer_id: 2,
+          customer_name: "Meera",
+          email: "meera@example.com",
+        },
+        {
+          customer_id: 4,
+          customer_name: "Rohan",
+          email: "rohan@example.com",
+        },
+      ],
+    },
+  },
+
+  {
+    id: "pyspark-fill-missing-cities",
+    title: "Fill Missing Cities",
+    description:
+      "Replace missing user cities with 'Unknown' using PySpark. Assign the answer to `result`.",
+    difficulty: "Easy",
+    questionType: "PySpark",
+    category: "Data Cleaning",
+    languages: ["PySpark"],
+    tags: ["NULL", "FILLNA"],
+    companies: ["Meta"],
+    solved: false,
+
+    starterCode: `from pyspark.sql import functions as F
+
+users = spark.createDataFrame(
+    [
+        (1, "Aarav", "Mumbai"),
+        (2, "Meera", None),
+        (3, "Rohan", "Delhi"),
+        (4, "Ananya", None),
+    ],
+    ["user_id", "username", "city"],
+)
+
+# TODO: fill missing cities with 'Unknown'.
+# Assign the final DataFrame to \`result\`.
+result = users`,
+
+    database: {
+      engine: "PostgreSQL",
+
+      tables: [
+        {
+          name: "users",
+
+          columns: [
+            {
+              name: "user_id",
+              type: "INTEGER",
+              nullable: false,
+            },
+            {
+              name: "username",
+              type: "TEXT",
+              nullable: false,
+            },
+            {
+              name: "city",
+              type: "TEXT",
+            },
+          ],
+
+          rows: [
+            {
+              user_id: 1,
+              username: "Aarav",
+              city: "Mumbai",
+            },
+            {
+              user_id: 2,
+              username: "Meera",
+              city: null,
+            },
+            {
+              user_id: 3,
+              username: "Rohan",
+              city: "Delhi",
+            },
+            {
+              user_id: 4,
+              username: "Ananya",
+              city: null,
+            },
+          ],
+        },
+      ],
+    },
+
+    validation: {
+      type: "result",
+      orderMatters: false,
+
+      expectedResult: [
+        {
+          user_id: 1,
+          username: "Aarav",
+          city: "Mumbai",
+        },
+        {
+          user_id: 2,
+          username: "Meera",
+          city: "Unknown",
+        },
+        {
+          user_id: 3,
+          username: "Rohan",
+          city: "Delhi",
+        },
+        {
+          user_id: 4,
+          username: "Ananya",
+          city: "Unknown",
+        },
+      ],
+    },
+  },
+
+  {
+    id: "pyspark-monthly-order-revenue",
+    title: "Monthly Order Revenue",
+    description:
+      "Aggregate order revenue by calendar month with PySpark. Assign the answer to `result`.",
+    difficulty: "Medium",
+    questionType: "PySpark",
+    category: "Aggregation",
+    languages: ["PySpark"],
+    tags: ["DATE", "MONTH", "GROUPBY"],
+    companies: ["Meta"],
+    solved: false,
+
+    starterCode: `from pyspark.sql import functions as F
+
+orders = spark.createDataFrame(
+    [
+        (101, "2026-01-05", 200.0),
+        (102, "2026-01-18", 350.0),
+        (103, "2026-02-02", 400.0),
+        (104, "2026-02-20", 150.0),
+        (105, "2026-03-10", 900.0),
+        (106, "2026-03-22", 250.0),
+    ],
+    ["order_id", "order_date", "amount"],
+)
+
+# TODO: compute total revenue per calendar month.
+# Assign the final DataFrame to \`result\` with columns
+# month and revenue.
+result = orders`,
+
+    database: {
+      engine: "PostgreSQL",
+
+      tables: [
+        {
+          name: "orders",
+
+          columns: [
+            {
+              name: "order_id",
+              type: "INTEGER",
+              nullable: false,
+            },
+            {
+              name: "order_date",
+              type: "DATE",
+              nullable: false,
+            },
+            {
+              name: "amount",
+              type: "DECIMAL",
+              nullable: false,
+            },
+          ],
+
+          rows: [
+            {
+              order_id: 101,
+              order_date: "2026-01-05",
+              amount: 200.0,
+            },
+            {
+              order_id: 102,
+              order_date: "2026-01-18",
+              amount: 350.0,
+            },
+            {
+              order_id: 103,
+              order_date: "2026-02-02",
+              amount: 400.0,
+            },
+            {
+              order_id: 104,
+              order_date: "2026-02-20",
+              amount: 150.0,
+            },
+            {
+              order_id: 105,
+              order_date: "2026-03-10",
+              amount: 900.0,
+            },
+            {
+              order_id: 106,
+              order_date: "2026-03-22",
+              amount: 250.0,
+            },
+          ],
+        },
+      ],
+    },
+
+    validation: {
+      type: "result",
+      orderMatters: false,
+
+      expectedResult: [
+        {
+          month: 1,
+          revenue: 550.0,
+        },
+        {
+          month: 2,
+          revenue: 550.0,
+        },
+        {
+          month: 3,
+          revenue: 1150.0,
+        },
+      ],
+    },
+  },
+
+  {
+    id: "pyspark-running-daily-revenue",
+    title: "Running Daily Revenue",
+    description:
+      "Compute the running total of revenue ordered by sale date with a PySpark window. Assign the answer to `result`.",
+    difficulty: "Medium",
+    questionType: "PySpark",
+    category: "Window Functions",
+    languages: ["PySpark"],
+    tags: ["WINDOW", "CUMULATIVE-SUM"],
+    companies: ["Meta"],
+    solved: false,
+
+    starterCode: `from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+
+sales = spark.createDataFrame(
+    [
+        (1, "2026-03-01", 1200.0),
+        (2, "2026-03-01", 850.0),
+        (3, "2026-03-02", 1450.0),
+        (4, "2026-03-03", 980.0),
+        (5, "2026-03-04", 1750.0),
+    ],
+    ["sale_id", "sale_date", "amount"],
+)
+
+# TODO: add a running total of amount ordered by
+# sale_date and sale_id.
+# Assign the final DataFrame to \`result\` with columns
+# sale_id, sale_date, amount and running_total.
+result = sales`,
+
+    database: {
+      engine: "PostgreSQL",
+
+      tables: [
+        {
+          name: "sales",
+
+          columns: [
+            {
+              name: "sale_id",
+              type: "INTEGER",
+              nullable: false,
+            },
+            {
+              name: "sale_date",
+              type: "DATE",
+              nullable: false,
+            },
+            {
+              name: "amount",
+              type: "DECIMAL",
+              nullable: false,
+            },
+          ],
+
+          rows: [
+            {
+              sale_id: 1,
+              sale_date: "2026-03-01",
+              amount: 1200.0,
+            },
+            {
+              sale_id: 2,
+              sale_date: "2026-03-01",
+              amount: 850.0,
+            },
+            {
+              sale_id: 3,
+              sale_date: "2026-03-02",
+              amount: 1450.0,
+            },
+            {
+              sale_id: 4,
+              sale_date: "2026-03-03",
+              amount: 980.0,
+            },
+            {
+              sale_id: 5,
+              sale_date: "2026-03-04",
+              amount: 1750.0,
+            },
+          ],
+        },
+      ],
+    },
+
+    validation: {
+      type: "result",
+      orderMatters: false,
+
+      expectedResult: [
+        {
+          sale_id: 1,
+          sale_date: "2026-03-01",
+          amount: 1200.0,
+          running_total: 1200.0,
+        },
+        {
+          sale_id: 2,
+          sale_date: "2026-03-01",
+          amount: 850.0,
+          running_total: 2050.0,
+        },
+        {
+          sale_id: 3,
+          sale_date: "2026-03-02",
+          amount: 1450.0,
+          running_total: 3500.0,
+        },
+        {
+          sale_id: 4,
+          sale_date: "2026-03-03",
+          amount: 980.0,
+          running_total: 4480.0,
+        },
+        {
+          sale_id: 5,
+          sale_date: "2026-03-04",
+          amount: 1750.0,
+          running_total: 6230.0,
+        },
+      ],
+    },
+  },
+
+  {
+    id: "pyspark-department-salary-ranks",
+    title: "Department Salary Ranks",
+    description:
+      "Rank employees within each department by salary with dense_rank, keeping tied salaries equal. Assign the answer to `result`.",
+    difficulty: "Medium",
+    questionType: "PySpark",
+    category: "Window Functions",
+    languages: ["PySpark"],
+    tags: ["DENSE_RANK", "PARTITION"],
+    companies: ["Meta"],
+    solved: false,
+
+    starterCode: `from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+
+employees = spark.createDataFrame(
+    [
+        (1, "Aarav", "Engineering", 125000),
+        (2, "Meera", "Engineering", 142000),
+        (3, "Rohan", "Engineering", 142000),
+        (4, "Ananya", "Finance", 110000),
+        (5, "Vikram", "Finance", 132000),
+        (6, "Ishita", "Finance", 110000),
+    ],
+    ["employee_id", "employee_name", "department", "salary"],
+)
+
+# TODO: rank employees within each department by salary
+# descending so tied salaries share a rank.
+# Assign the final DataFrame to \`result\` with columns
+# employee_name, department, salary and salary_rank.
+result = employees`,
+
+    database: {
+      engine: "PostgreSQL",
+
+      tables: [
+        {
+          name: "employees",
+
+          columns: [
+            {
+              name: "employee_id",
+              type: "INTEGER",
+              nullable: false,
+            },
+            {
+              name: "employee_name",
+              type: "TEXT",
+              nullable: false,
+            },
+            {
+              name: "department",
+              type: "TEXT",
+              nullable: false,
+            },
+            {
+              name: "salary",
+              type: "INTEGER",
+              nullable: false,
+            },
+          ],
+
+          rows: [
+            {
+              employee_id: 1,
+              employee_name: "Aarav",
+              department: "Engineering",
+              salary: 125000,
+            },
+            {
+              employee_id: 2,
+              employee_name: "Meera",
+              department: "Engineering",
+              salary: 142000,
+            },
+            {
+              employee_id: 3,
+              employee_name: "Rohan",
+              department: "Engineering",
+              salary: 142000,
+            },
+            {
+              employee_id: 4,
+              employee_name: "Ananya",
+              department: "Finance",
+              salary: 110000,
+            },
+            {
+              employee_id: 5,
+              employee_name: "Vikram",
+              department: "Finance",
+              salary: 132000,
+            },
+            {
+              employee_id: 6,
+              employee_name: "Ishita",
+              department: "Finance",
+              salary: 110000,
+            },
+          ],
+        },
+      ],
+    },
+
+    validation: {
+      type: "result",
+      orderMatters: false,
+
+      expectedResult: [
+        {
+          employee_name: "Meera",
+          department: "Engineering",
+          salary: 142000,
+          salary_rank: 1,
+        },
+        {
+          employee_name: "Rohan",
+          department: "Engineering",
+          salary: 142000,
+          salary_rank: 1,
+        },
+        {
+          employee_name: "Aarav",
+          department: "Engineering",
+          salary: 125000,
+          salary_rank: 2,
+        },
+        {
+          employee_name: "Vikram",
+          department: "Finance",
+          salary: 132000,
+          salary_rank: 1,
+        },
+        {
+          employee_name: "Ananya",
+          department: "Finance",
+          salary: 110000,
+          salary_rank: 2,
+        },
+        {
+          employee_name: "Ishita",
+          department: "Finance",
+          salary: 110000,
+          salary_rank: 2,
+        },
+      ],
+    },
+  },
+
+  {
+    id: "pyspark-order-value-segments",
+    title: "Order Value Segments",
+    description:
+      "Classify each order as Premium, Standard, or Basic from its amount with PySpark. Assign the answer to `result`.",
+    difficulty: "Hard",
+    questionType: "PySpark",
+    category: "Conditional Logic",
+    languages: ["PySpark"],
+    tags: ["WHEN", "OTHERWISE"],
+    companies: ["Meta"],
+    solved: false,
+
+    starterCode: `from pyspark.sql import functions as F
+
+orders = spark.createDataFrame(
+    [
+        (101, 250.0),
+        (102, 1800.0),
+        (103, 3200.0),
+        (104, 950.0),
+        (105, 4200.0),
+        (106, 1500.0),
+    ],
+    ["order_id", "amount"],
+)
+
+# TODO: classify each order by amount: 3000 and above is
+# Premium, 1000 and above is Standard, otherwise Basic.
+# Assign the final DataFrame to \`result\` with columns
+# order_id, amount and segment.
+result = orders`,
+
+    database: {
+      engine: "PostgreSQL",
+
+      tables: [
+        {
+          name: "orders",
+
+          columns: [
+            {
+              name: "order_id",
+              type: "INTEGER",
+              nullable: false,
+            },
+            {
+              name: "amount",
+              type: "DECIMAL",
+              nullable: false,
+            },
+          ],
+
+          rows: [
+            {
+              order_id: 101,
+              amount: 250.0,
+            },
+            {
+              order_id: 102,
+              amount: 1800.0,
+            },
+            {
+              order_id: 103,
+              amount: 3200.0,
+            },
+            {
+              order_id: 104,
+              amount: 950.0,
+            },
+            {
+              order_id: 105,
+              amount: 4200.0,
+            },
+            {
+              order_id: 106,
+              amount: 1500.0,
+            },
+          ],
+        },
+      ],
+    },
+
+    validation: {
+      type: "result",
+      orderMatters: false,
+
+      expectedResult: [
+        {
+          order_id: 101,
+          amount: 250.0,
+          segment: "Basic",
+        },
+        {
+          order_id: 102,
+          amount: 1800.0,
+          segment: "Standard",
+        },
+        {
+          order_id: 103,
+          amount: 3200.0,
+          segment: "Premium",
+        },
+        {
+          order_id: 104,
+          amount: 950.0,
+          segment: "Basic",
+        },
+        {
+          order_id: 105,
+          amount: 4200.0,
+          segment: "Premium",
+        },
+        {
+          order_id: 106,
+          amount: 1500.0,
+          segment: "Standard",
+        },
+      ],
+    },
+  },
+
+  {
+    id: "pyspark-valid-transaction-filter",
+    title: "Valid Transaction Filter",
+    description:
+      "Keep only complete transactions with a positive amount using PySpark. Assign the answer to `result`.",
+    difficulty: "Hard",
+    questionType: "PySpark",
+    category: "Data Quality",
+    languages: ["PySpark"],
+    tags: ["FILTER", "ISNOTNULL"],
+    companies: ["Meta"],
+    solved: false,
+
+    starterCode: `from pyspark.sql import functions as F
+
+transactions = spark.createDataFrame(
+    [
+        (1, 250.0, "complete"),
+        (2, None, "complete"),
+        (3, -50.0, "complete"),
+        (4, 300.0, None),
+        (5, 0.0, "pending"),
+        (6, 120.0, "complete"),
+    ],
+    ["transaction_id", "amount", "status"],
+)
+
+# TODO: keep rows where amount is present and positive
+# and status is complete.
+# Assign the final DataFrame to \`result\`.
+result = transactions`,
+
+    database: {
+      engine: "PostgreSQL",
+
+      tables: [
+        {
+          name: "transactions",
+
+          columns: [
+            {
+              name: "transaction_id",
+              type: "INTEGER",
+              nullable: false,
+            },
+            {
+              name: "amount",
+              type: "DECIMAL",
+            },
+            {
+              name: "status",
+              type: "TEXT",
+            },
+          ],
+
+          rows: [
+            {
+              transaction_id: 1,
+              amount: 250.0,
+              status: "complete",
+            },
+            {
+              transaction_id: 2,
+              amount: null,
+              status: "complete",
+            },
+            {
+              transaction_id: 3,
+              amount: -50.0,
+              status: "complete",
+            },
+            {
+              transaction_id: 4,
+              amount: 300.0,
+              status: null,
+            },
+            {
+              transaction_id: 5,
+              amount: 0.0,
+              status: "pending",
+            },
+            {
+              transaction_id: 6,
+              amount: 120.0,
+              status: "complete",
+            },
+          ],
+        },
+      ],
+    },
+
+    validation: {
+      type: "result",
+      orderMatters: false,
+
+      expectedResult: [
+        {
+          transaction_id: 1,
+          amount: 250.0,
+          status: "complete",
+        },
+        {
+          transaction_id: 6,
+          amount: 120.0,
+          status: "complete",
+        },
+      ],
+    },
+  },
 ];
