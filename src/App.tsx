@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import {
   BarChart3,
@@ -34,6 +34,12 @@ import {
 } from "./lib/bookmarks";
 import QuestionCard from "./components/QuestionCard";
 import QuestionFilters from "./components/QuestionFilters";
+import type { DiscoveryFilters } from "./lib/questionFilter";
+import {
+  filterQuestions,
+  filtersToSearchParams,
+  parseFilterSearchParams,
+} from "./lib/questionFilter";
 
 const navigation = [
   { label: "Home", icon: Home },
@@ -53,19 +59,29 @@ const practiceItems = [
 const PAGE_SIZE = 10;
 
 function App() {
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchParams, setSearchParams] =
+    useSearchParams();
+
+  const [initialFilters] =
+    useState<DiscoveryFilters>(() =>
+      parseFilterSearchParams(window.location.search),
+    );
+
+  const [searchTerm, setSearchTerm] = useState(
+    initialFilters.searchTerm,
+  );
   const [selectedDifficulty, setSelectedDifficulty] =
-    useState("All");
+    useState(initialFilters.difficulty);
   const [selectedQuestionType, setSelectedQuestionType] =
-    useState("All");
+    useState(initialFilters.questionType);
   const [selectedLanguage, setSelectedLanguage] =
-    useState("All");
+    useState(initialFilters.language);
   const [selectedCompany, setSelectedCompany] =
-    useState("All");
+    useState(initialFilters.company);
   const [selectedStatus, setSelectedStatus] =
-    useState("All");
+    useState(initialFilters.status);
   const [selectedCategory, setSelectedCategory] =
-    useState("All");
+    useState(initialFilters.category);
 
   const [solvedQuestionIds, setSolvedQuestionIds] =
     useState<Set<string>>(
@@ -78,7 +94,7 @@ function App() {
     );
 
   const [showBookmarkedOnly, setShowBookmarkedOnly] =
-    useState(false);
+    useState(initialFilters.bookmarkedOnly);
 
   const [adminQuestions, setAdminQuestions] = useState<
     Question[]
@@ -119,6 +135,8 @@ function App() {
 
   const [currentPage, setCurrentPage] = useState(1);
 
+  const suppressUrlSync = useRef(false);
+
   useEffect(() => {
     setCurrentPage(1);
   }, [
@@ -131,6 +149,79 @@ function App() {
     selectedCategory,
     showBookmarkedOnly,
   ]);
+
+  useEffect(() => {
+    const next = filtersToSearchParams({
+      searchTerm,
+      difficulty: selectedDifficulty,
+      questionType: selectedQuestionType,
+      language: selectedLanguage,
+      company: selectedCompany,
+      status: selectedStatus,
+      category: selectedCategory,
+      bookmarkedOnly: showBookmarkedOnly,
+    });
+
+    if (next.toString() !== searchParams.toString()) {
+      suppressUrlSync.current = true;
+      setSearchParams(next, { replace: true });
+    }
+  }, [
+    searchParams,
+    setSearchParams,
+    searchTerm,
+    selectedDifficulty,
+    selectedQuestionType,
+    selectedLanguage,
+    selectedCompany,
+    selectedStatus,
+    selectedCategory,
+    showBookmarkedOnly,
+  ]);
+
+  useEffect(() => {
+    if (suppressUrlSync.current) {
+      suppressUrlSync.current = false;
+      return;
+    }
+
+    const parsed = parseFilterSearchParams(
+      searchParams.toString(),
+    );
+
+    setSearchTerm(parsed.searchTerm);
+    setSelectedDifficulty(parsed.difficulty);
+    setSelectedQuestionType(parsed.questionType);
+    setSelectedLanguage(parsed.language);
+    setSelectedCompany(parsed.company);
+    setSelectedStatus(parsed.status);
+    setSelectedCategory(parsed.category);
+    setShowBookmarkedOnly(parsed.bookmarkedOnly);
+  }, [searchParams]);
+
+  const discoverySearch = useMemo(
+    () =>
+      filtersToSearchParams({
+        searchTerm,
+        difficulty: selectedDifficulty,
+        questionType: selectedQuestionType,
+        language: selectedLanguage,
+        company: selectedCompany,
+        status: selectedStatus,
+        category: selectedCategory,
+        bookmarkedOnly: showBookmarkedOnly,
+      }).toString(),
+    [
+      searchTerm,
+      selectedDifficulty,
+      selectedQuestionType,
+      selectedLanguage,
+      selectedCompany,
+      selectedStatus,
+      selectedCategory,
+      showBookmarkedOnly,
+    ],
+  );
 
   useEffect(() => {
     const syncProgress = () => {
@@ -258,88 +349,37 @@ function App() {
     ).sort((a, b) => a.localeCompare(b)),
   ];
 
-  const filteredQuestions = useMemo(() => {
-    const normalizedSearch =
-      searchTerm.trim().toLowerCase();
-
-    return allQuestions.filter((question) => {
-      const matchesBookmark =
-        !showBookmarkedOnly ||
-        bookmarkedQuestionIds.has(question.id);
-
-      const matchesSearch =
-        normalizedSearch === "" ||
-        question.title
-          .toLowerCase()
-          .includes(normalizedSearch) ||
-        question.description
-          .toLowerCase()
-          .includes(normalizedSearch) ||
-        question.category
-          .toLowerCase()
-          .includes(normalizedSearch) ||
-        question.tags.some((tag) =>
-          tag
-            .toLowerCase()
-            .includes(normalizedSearch),
-        );
-
-      const matchesDifficulty =
-        selectedDifficulty === "All" ||
-        question.difficulty ===
-          selectedDifficulty;
-
-      const matchesQuestionType =
-        selectedQuestionType === "All" ||
-        question.questionType ===
-          selectedQuestionType;
-
-      const matchesLanguage =
-        selectedLanguage === "All" ||
-        question.languages.includes(
-          selectedLanguage,
-        );
-
-      const matchesCompany =
-        selectedCompany === "All" ||
-        question.companies.includes(
-          selectedCompany,
-        );
-
-      const matchesStatus =
-        selectedStatus === "All" ||
-        (selectedStatus === "Solved"
-          ? solvedQuestionIds.has(question.id)
-          : !solvedQuestionIds.has(question.id));
-
-      const matchesCategory =
-        selectedCategory === "All" ||
-        question.category === selectedCategory;
-
-      return (
-        matchesBookmark &&
-        matchesSearch &&
-        matchesDifficulty &&
-        matchesQuestionType &&
-        matchesLanguage &&
-        matchesCompany &&
-        matchesStatus &&
-        matchesCategory
-      );
-    });
-  }, [
-    allQuestions,
-    searchTerm,
-    selectedDifficulty,
-    selectedQuestionType,
-    selectedLanguage,
-    selectedCompany,
-    selectedStatus,
-    selectedCategory,
-    solvedQuestionIds,
-    showBookmarkedOnly,
-    bookmarkedQuestionIds,
-  ]);
+  const filteredQuestions = useMemo(
+    () =>
+      filterQuestions(
+        allQuestions,
+        {
+          searchTerm,
+          difficulty: selectedDifficulty,
+          questionType: selectedQuestionType,
+          language: selectedLanguage,
+          company: selectedCompany,
+          status: selectedStatus,
+          category: selectedCategory,
+          bookmarkedOnly: showBookmarkedOnly,
+        },
+        solvedQuestionIds,
+        bookmarkedQuestionIds,
+      ),
+    [
+      allQuestions,
+      searchTerm,
+      selectedDifficulty,
+      selectedQuestionType,
+      selectedLanguage,
+      selectedCompany,
+      selectedStatus,
+      selectedCategory,
+      solvedQuestionIds,
+      showBookmarkedOnly,
+      bookmarkedQuestionIds,
+    ],
+  );
 
   const totalQuestions = allQuestions.length;
 
@@ -712,6 +752,9 @@ function App() {
                           )}
                           onToggleBookmark={
                             handleToggleBookmark
+                          }
+                          discoverySearch={
+                            discoverySearch
                           }
                         />
                       ),

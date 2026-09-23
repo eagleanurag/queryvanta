@@ -38,7 +38,14 @@ import { questions } from "../data/questions";
 import type { Question } from "../data/questions";
 import type { TableDefinition } from "../data/questions";
 import type { AdminFormDraft } from "./AdminPage";
-import { getAdminQuestions } from "../lib/adminQuestions";
+import {
+  ADMIN_QUESTIONS_EVENT,
+  getAdminQuestions,
+} from "../lib/adminQuestions";
+import {
+  BOOKMARKS_EVENT,
+  getBookmarkedQuestionIds,
+} from "../lib/bookmarks";
 import {
   clearAttempts,
   getAttempts,
@@ -48,8 +55,15 @@ import type { QuestionAttempt } from "../lib/attempts";
 import { createQuestionDatabase } from "../lib/pglite";
 import { PysparkClient } from "../lib/pysparkClient";
 import {
+  filterQuestions,
+  hasDiscoveryParams,
+  parseFilterSearchParams,
+} from "../lib/questionFilter";
+import {
+  getSolvedQuestionIds,
   isQuestionSolved,
   markQuestionSolved,
+  PROGRESS_EVENT,
 } from "../lib/progress";
 import { validateResult } from "../lib/validation";
 
@@ -318,9 +332,68 @@ function QuestionPage() {
   const isPreview =
     isPreviewRoute && previewQuestion !== null;
 
+  const [navSolvedIds, setNavSolvedIds] =
+    useState<Set<string>>(() =>
+      getSolvedQuestionIds(),
+    );
+
+  const [navBookmarkedIds, setNavBookmarkedIds] =
+    useState<Set<string>>(() =>
+      getBookmarkedQuestionIds(),
+    );
+
+  const [navListVersion, setNavListVersion] =
+    useState(0);
+
+  useEffect(() => {
+    const syncNavState = () => {
+      setNavSolvedIds(getSolvedQuestionIds());
+      setNavBookmarkedIds(getBookmarkedQuestionIds());
+      setNavListVersion(
+        (version) => version + 1,
+      );
+    };
+
+    window.addEventListener(
+      PROGRESS_EVENT,
+      syncNavState,
+    );
+    window.addEventListener(
+      BOOKMARKS_EVENT,
+      syncNavState,
+    );
+    window.addEventListener(
+      ADMIN_QUESTIONS_EVENT,
+      syncNavState,
+    );
+    window.addEventListener(
+      "storage",
+      syncNavState,
+    );
+
+    return () => {
+      window.removeEventListener(
+        PROGRESS_EVENT,
+        syncNavState,
+      );
+      window.removeEventListener(
+        BOOKMARKS_EVENT,
+        syncNavState,
+      );
+      window.removeEventListener(
+        ADMIN_QUESTIONS_EVENT,
+        syncNavState,
+      );
+      window.removeEventListener(
+        "storage",
+        syncNavState,
+      );
+    };
+  }, []);
+
   const allQuestions = useMemo(
     () => [...questions, ...getAdminQuestions()],
-    [questionId],
+    [questionId, navListVersion],
   );
 
   const question =
@@ -330,19 +403,49 @@ function QuestionPage() {
           (item) => item.id === questionId,
         );
 
-  const currentQuestionIndex = allQuestions.findIndex(
+  const discoveryFilters = useMemo(
+    () => parseFilterSearchParams(location.search),
+    [location.search],
+  );
+
+  const hasDiscoveryContext = useMemo(
+    () => hasDiscoveryParams(location.search),
+    [location.search],
+  );
+
+  const navQuestions = useMemo(() => {
+    if (isPreview || !hasDiscoveryContext) {
+      return allQuestions;
+    }
+
+    return filterQuestions(
+      allQuestions,
+      discoveryFilters,
+      navSolvedIds,
+      navBookmarkedIds,
+    );
+  }, [
+    isPreview,
+    hasDiscoveryContext,
+    allQuestions,
+    discoveryFilters,
+    navSolvedIds,
+    navBookmarkedIds,
+  ]);
+
+  const currentQuestionIndex = navQuestions.findIndex(
     (item) => item.id === questionId,
   );
 
   const previousQuestion =
     currentQuestionIndex > 0
-      ? allQuestions[currentQuestionIndex - 1]
+      ? navQuestions[currentQuestionIndex - 1]
       : null;
 
   const nextQuestion =
     currentQuestionIndex >= 0 &&
-    currentQuestionIndex < allQuestions.length - 1
-      ? allQuestions[currentQuestionIndex + 1]
+    currentQuestionIndex < navQuestions.length - 1
+      ? navQuestions[currentQuestionIndex + 1]
       : null;
 
   const database = question?.database;
@@ -979,7 +1082,10 @@ function QuestionPage() {
           </p>
 
           <Link
-            to="/"
+            to={{
+              pathname: "/",
+              search: location.search,
+            }}
             className="mt-6 inline-flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
           >
             <ArrowLeft size={16} />
@@ -1021,7 +1127,10 @@ function QuestionPage() {
           ) : (
             <>
               <Link
-                to="/"
+                to={{
+                  pathname: "/",
+                  search: location.search,
+                }}
                 className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900"
               >
                 <ArrowLeft size={17} />
@@ -1815,34 +1924,38 @@ function QuestionPage() {
               type="button"
               onClick={() => {
                 if (previousQuestion) {
-                  navigate(
-                    `/question/${previousQuestion.id}`,
-                  );
+                  navigate({
+                    pathname: `/question/${previousQuestion.id}`,
+                    search: location.search,
+                  });
                 }
               }}
               disabled={!previousQuestion}
+              aria-label="Previous question"
               className="flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
             >
               <ChevronLeft size={16} />
               Previous Question
             </button>
 
-            <span className="text-xs text-gray-500">
-              {currentQuestionIndex >= 0
-                ? `Question ${currentQuestionIndex + 1} of ${allQuestions.length}`
-                : `Question 0 of ${allQuestions.length}`}
-            </span>
+            {currentQuestionIndex >= 0 && (
+              <span className="text-xs text-gray-500">
+                {`Question ${currentQuestionIndex + 1} of ${navQuestions.length}`}
+              </span>
+            )}
 
             <button
               type="button"
               onClick={() => {
                 if (nextQuestion) {
-                  navigate(
-                    `/question/${nextQuestion.id}`,
-                  );
+                  navigate({
+                    pathname: `/question/${nextQuestion.id}`,
+                    search: location.search,
+                  });
                 }
               }}
               disabled={!nextQuestion}
+              aria-label="Next question"
               className="flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
             >
               Next Question

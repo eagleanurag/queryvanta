@@ -12,6 +12,7 @@ type QuestionCardProps = {
   isSolved: boolean;
   isBookmarked: boolean;
   onToggleBookmark: (questionId: string) => void;
+  discoverySearch?: string;
 };
 
 function QuestionCard({
@@ -19,11 +20,15 @@ function QuestionCard({
   isSolved,
   isBookmarked,
   onToggleBookmark,
+  discoverySearch = "",
 }: QuestionCardProps) {
   return (
     <div className="relative">
       <Link
-        to={`/question/${question.id}`}
+        to={{
+          pathname: `/question/${question.id}`,
+          search: discoverySearch,
+        }}
         className="block rounded-lg border border-gray-100 p-5 pr-16 transition hover:border-gray-200 hover:bg-gray-50 hover:shadow-sm"
       >
         <div className="min-w-0">
