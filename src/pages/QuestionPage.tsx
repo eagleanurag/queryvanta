@@ -1502,19 +1502,6 @@ function QuestionPage() {
                         </p>
                       </div>
                     )}
-
-                    {executionStatus === "success" &&
-                      pysparkOutput.trim() !== "" && (
-                        <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
-                          <p className="text-xs font-semibold text-gray-500">
-                            Program output
-                          </p>
-
-                          <pre className="mt-2 whitespace-pre-wrap font-mono text-xs leading-5 text-gray-600">
-                            {pysparkOutput}
-                          </pre>
-                        </div>
-                      )}
                   </>
                 )}
                     {executionStatus === "success" && (
@@ -1636,6 +1623,12 @@ function QuestionPage() {
                     )}
                   </div>
 
+                  {isPySpark && (
+                    <p className="mt-1 text-[11px] text-gray-400">
+                      Validated result DataFrame
+                    </p>
+                  )}
+
                   {rows.length > 0 ? (
                     <div className="mt-3 overflow-auto rounded-lg border border-gray-200">
                       <table className="min-w-full text-left text-xs">
@@ -1694,6 +1687,20 @@ function QuestionPage() {
                     )
                   )}
                 </div>
+
+                {isPySpark &&
+                  executionStatus === "success" &&
+                  pysparkOutput.trim() !== "" && (
+                    <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                      <p className="text-xs font-semibold text-gray-500">
+                        Program output
+                      </p>
+
+                      <pre className="mt-2 whitespace-pre-wrap font-mono text-xs leading-5 text-gray-600">
+                        {pysparkOutput}
+                      </pre>
+                    </div>
+                  )}
               </div>
             </section>
           </div>
