@@ -80,6 +80,15 @@ export const questions: Question[] = [
     companies: ["Netflix"],
     solved: false,
 
+    hint: "Filter rows with WHERE on views, then order by duration.",
+    solutionCode: `SELECT
+    *
+FROM videos
+WHERE views > 1000000
+ORDER BY duration_seconds;`,
+    explanation:
+      "WHERE narrows the rows before anything else happens, so only videos above the view threshold reach the sort. ORDER BY duration_seconds then arranges those survivors from shortest to longest.",
+
     starterCode: `SELECT
     *
 FROM videos
@@ -219,6 +228,17 @@ ORDER BY duration_seconds;`,
     companies: ["Amazon"],
     solved: false,
 
+    hint: "Group by customer, count rows and sum amounts, then order by the total.",
+    solutionCode: `SELECT
+    customer_id,
+    COUNT(*) AS total_orders,
+    SUM(order_amount) AS total_revenue
+FROM orders
+GROUP BY customer_id
+ORDER BY total_revenue DESC;`,
+    explanation:
+      "GROUP BY partitions orders into one group per customer, and COUNT plus SUM collapse each partition into a single summary row. Aliasing the aggregates gives them names that ORDER BY can then reference directly.",
+
     starterCode: `SELECT
     customer_id,
     COUNT(*) AS total_orders,
@@ -335,6 +355,21 @@ ORDER BY total_revenue DESC;`,
     tags: ["WINDOW FUNCTION", "RANK", "PARTITION BY"],
     companies: ["Microsoft"],
     solved: false,
+
+    hint: "Rank inside each department with a window partitioned by department.",
+    solutionCode: `SELECT
+    employee_id,
+    employee_name,
+    department,
+    salary,
+    RANK() OVER (
+        PARTITION BY department
+        ORDER BY salary DESC
+    ) AS salary_rank
+FROM employees
+ORDER BY department, salary_rank;`,
+    explanation:
+      "A window function computes a value per row without collapsing rows. PARTITION BY restarts the ranking for every department, ORDER BY salary DESC puts the highest earner first, and the outer ORDER BY only arranges the display.",
 
     starterCode: `SELECT
     employee_id,
@@ -482,6 +517,23 @@ ORDER BY department, salary_rank;`,
     tags: ["CTE", "ROW_NUMBER", "DEDUPLICATION"],
     companies: ["Google"],
     solved: false,
+
+    hint: "Number rows per email by recency in a CTE, then keep number 1.",
+    solutionCode: `WITH ranked_customers AS (
+    SELECT
+        *,
+        ROW_NUMBER() OVER (
+            PARTITION BY email
+            ORDER BY updated_at DESC
+        ) AS row_num
+    FROM customers
+)
+SELECT *
+FROM ranked_customers
+WHERE row_num = 1
+ORDER BY email;`,
+    explanation:
+      "Window functions cannot appear in WHERE, so a CTE first materializes the row numbers and the outer query filters on them. Partitioning by email with the newest record ordered first makes row_num = 1 exactly the latest record per address.",
 
     starterCode: `WITH ranked_customers AS (
     SELECT
@@ -702,6 +754,18 @@ result = daily_sales.withColumn(
     companies: ["Amazon", "Shopify"],
     solved: false,
 
+    hint: "Join on the shared customer_id key, then sort by order.",
+    solutionCode: `SELECT
+    orders.order_id,
+    customers.customer_name,
+    orders.amount
+FROM orders
+JOIN customers
+    ON customers.customer_id = orders.customer_id
+ORDER BY orders.order_id;`,
+    explanation:
+      "An inner join matches rows from both tables on the shared key, so each order gains its customer name. Qualifying column names with table names keeps the query unambiguous when both tables share a column.",
+
     starterCode: `SELECT
     orders.order_id,
     customers.customer_name,
@@ -844,6 +908,16 @@ ORDER BY orders.order_id;`,
     companies: ["Amazon"],
     solved: false,
 
+    hint: "Aggregate per category, then filter groups with HAVING.",
+    solutionCode: `SELECT
+    category,
+    ROUND(AVG(price), 2) AS avg_price
+FROM products
+GROUP BY category
+HAVING AVG(price) > 100;`,
+    explanation:
+      "GROUP BY builds one row per category, but aggregate conditions cannot go in WHERE because it runs before grouping. HAVING filters after aggregation, keeping only categories whose average clears the bar.",
+
     starterCode: `SELECT
     category,
     ROUND(AVG(price), 2) AS avg_price
@@ -948,6 +1022,20 @@ HAVING AVG(price) > 100;`,
     tags: ["CASE", "ORDER BY"],
     companies: ["Microsoft"],
     solved: false,
+
+    hint: "Map salary ranges to labels with CASE, highest band first.",
+    solutionCode: `SELECT
+    employee_id,
+    employee_name,
+    CASE
+        WHEN salary >= 100000 THEN 'High'
+        WHEN salary >= 60000 THEN 'Medium'
+        ELSE 'Entry'
+    END AS salary_band
+FROM staff
+ORDER BY employee_id;`,
+    explanation:
+      "CASE evaluates its branches in order and takes the first match, so listing bands from highest to lowest guarantees each salary lands in exactly one band. ELSE acts as the safety net for everything the earlier conditions skipped.",
 
     starterCode: `SELECT
     employee_id,
@@ -1063,6 +1151,15 @@ ORDER BY employee_id;`,
     companies: ["Shopify"],
     solved: false,
 
+    hint: "Treat a missing discount as zero before subtracting.",
+    solutionCode: `SELECT
+    product_name,
+    price - COALESCE(discount, 0) AS final_price
+FROM products
+ORDER BY product_id;`,
+    explanation:
+      "Arithmetic with NULL yields NULL, so a missing discount would blank the whole price. COALESCE substitutes zero only where the value is absent, leaving real discounts untouched.",
+
     starterCode: `SELECT
     product_name,
     price - COALESCE(discount, 0) AS final_price
@@ -1166,6 +1263,17 @@ ORDER BY product_id;`,
     companies: ["Spotify", "Airbnb"],
     solved: false,
 
+    hint: "Compare the date column against a fixed DATE literal.",
+    solutionCode: `SELECT
+    user_id,
+    username,
+    signup_date
+FROM users
+WHERE signup_date >= DATE '2026-02-01'
+ORDER BY signup_date;`,
+    explanation:
+      "Date literals compare chronologically just like numbers, so a single range predicate selects everything from the cutoff onward. Ordering by the same date column returns the earliest signups first.",
+
     starterCode: `SELECT
     user_id,
     username,
@@ -1266,6 +1374,17 @@ ORDER BY signup_date;`,
     tags: ["GROUP BY", "SUM", "ORDER BY", "LIMIT"],
     companies: ["Amazon", "Stripe"],
     solved: false,
+
+    hint: "Aggregate, sort descending with a name tiebreaker, take 3.",
+    solutionCode: `SELECT
+    product_name,
+    SUM(quantity) AS total_quantity
+FROM sales
+GROUP BY product_name
+ORDER BY total_quantity DESC, product_name ASC
+LIMIT 3;`,
+    explanation:
+      "LIMIT applies after ORDER BY, so sorting first decides exactly which rows survive. The secondary name sort makes the cutoff deterministic when quantities tie, which a bare top-N would leave to chance.",
 
     starterCode: `SELECT
     product_name,
@@ -1370,6 +1489,17 @@ LIMIT 3;`,
     companies: ["Google"],
     solved: false,
 
+    hint: "Group by email and keep groups with a count above 1.",
+    solutionCode: `SELECT
+    email,
+    COUNT(*) AS signup_count
+FROM subscribers
+GROUP BY email
+HAVING COUNT(*) > 1
+ORDER BY email;`,
+    explanation:
+      "Duplicate detection is aggregation in disguise: grouping by email collapses repeats, and the per-group count reveals how many times each address appears. HAVING then keeps only the addresses seen more than once.",
+
     starterCode: `SELECT
     email,
     COUNT(*) AS signup_count
@@ -1457,6 +1587,18 @@ ORDER BY email;`,
     tags: ["LEFT JOIN", "NULL", "ORDER BY"],
     companies: ["Shopify", "Stripe"],
     solved: false,
+
+    hint: "LEFT JOIN keeps all customers; unmatched rows have NULL on the right.",
+    solutionCode: `SELECT
+    customers.customer_id,
+    customers.customer_name
+FROM customers
+LEFT JOIN orders
+    ON orders.customer_id = customers.customer_id
+WHERE orders.order_id IS NULL
+ORDER BY customers.customer_id;`,
+    explanation:
+      "A LEFT JOIN preserves every left-side row, filling the right side with NULLs where nothing matched. Checking IS NULL on an order column therefore isolates exactly the customers with no orders — an anti-join without a subquery.",
 
     starterCode: `SELECT
     customers.customer_id,
@@ -1573,6 +1715,17 @@ ORDER BY customers.customer_id;`,
     companies: ["Microsoft", "Google"],
     solved: false,
 
+    hint: "Join the table to itself with two aliases.",
+    solutionCode: `SELECT
+    employees.employee_name AS employee,
+    managers.employee_name AS manager
+FROM employees
+JOIN employees AS managers
+    ON managers.employee_id = employees.manager_id
+ORDER BY employee;`,
+    explanation:
+      "A self-join treats one table as two different roles — here each employee row meets the row of their manager. Aliases are mandatory so the query can tell the two copies apart in both the join condition and the output.",
+
     starterCode: `SELECT
     employees.employee_name AS employee,
     managers.employee_name AS manager
@@ -1674,6 +1827,16 @@ ORDER BY employee;`,
     companies: ["Amazon"],
     solved: false,
 
+    hint: "Compare each price against a scalar subquery average.",
+    solutionCode: `SELECT
+    product_name,
+    price
+FROM products
+WHERE price > (SELECT AVG(price) FROM products)
+ORDER BY price;`,
+    explanation:
+      "An uncorrelated scalar subquery runs once and returns a single value that every row is measured against. Because it has no link to the outer row, the database computes the average a single time rather than per product.",
+
     starterCode: `SELECT
     product_name,
     price
@@ -1766,6 +1929,21 @@ ORDER BY price;`,
     tags: ["CTE", "SUM", "TO_CHAR"],
     companies: ["Uber", "Stripe"],
     solved: false,
+
+    hint: "Bucket rows into months in a CTE, then filter the totals.",
+    solutionCode: `WITH monthly_revenue AS (
+    SELECT
+        TO_CHAR(order_date, 'YYYY-MM') AS month,
+        SUM(amount) AS revenue
+    FROM orders
+    GROUP BY 1
+)
+SELECT month, revenue
+FROM monthly_revenue
+WHERE revenue > 600
+ORDER BY month;`,
+    explanation:
+      "A CTE names the monthly rollup so the outer query reads like plain filtering. TO_CHAR turns each date into a sortable month label, GROUP BY 1 reuses the first select item, and the outer WHERE keeps only the strong months.",
 
     starterCode: `WITH monthly_revenue AS (
     SELECT
@@ -1865,6 +2043,17 @@ ORDER BY month;`,
     tags: ["CASE", "SUM", "GROUP BY"],
     companies: ["Meta", "Amazon"],
     solved: false,
+
+    hint: "Sum conditionally per channel with CASE inside SUM.",
+    solutionCode: `SELECT
+    region,
+    SUM(CASE WHEN channel = 'Online' THEN amount ELSE 0 END) AS online_revenue,
+    SUM(CASE WHEN channel = 'Store' THEN amount ELSE 0 END) AS store_revenue
+FROM orders
+GROUP BY region
+ORDER BY region;`,
+    explanation:
+      "Conditional aggregation pivots rows into columns without any join: each CASE contributes its amount only to its own channel's sum and zero elsewhere. One grouped pass therefore yields both channel totals side by side.",
 
     starterCode: `SELECT
     region,
@@ -1982,6 +2171,18 @@ ORDER BY region;`,
     tags: ["GROUP BY", "COUNT", "AVG", "HAVING"],
     companies: ["Google", "Microsoft"],
     solved: false,
+
+    hint: "Filter groups on both size and average.",
+    solutionCode: `SELECT
+    department,
+    COUNT(*) AS headcount,
+    ROUND(AVG(salary), 2) AS avg_salary
+FROM employees
+GROUP BY department
+HAVING COUNT(*) >= 3 AND AVG(salary) > 95000
+ORDER BY department;`,
+    explanation:
+      "HAVING can combine several aggregate predicates with AND, so a department must clear both the headcount bar and the pay bar at once. ROUND keeps the average readable without changing which groups qualify.",
 
     starterCode: `SELECT
     department,
@@ -2114,6 +2315,18 @@ ORDER BY department;`,
     companies: ["Stripe", "Uber"],
     solved: false,
 
+    hint: "Sum over a window ordered by date with the default frame.",
+    solutionCode: `SELECT
+    order_id,
+    order_date,
+    SUM(amount) OVER (
+        ORDER BY order_date, order_id
+    ) AS running_total
+FROM orders
+ORDER BY order_date, order_id;`,
+    explanation:
+      "An ordered window turns SUM into a running total: the default frame spans from the first row to the current one, so each row accumulates everything before it. Including the id in the ordering keeps same-day rows in a stable sequence.",
+
     starterCode: `SELECT
     order_id,
     order_date,
@@ -2215,6 +2428,23 @@ ORDER BY order_date, order_id;`,
     tags: ["AGE", "EXTRACT", "CASE"],
     companies: ["Meta", "Airbnb"],
     solved: false,
+
+    hint: "Derive whole years with AGE plus EXTRACT, then label with CASE.",
+    solutionCode: `SELECT
+    employee_name,
+    EXTRACT(
+        YEAR FROM AGE(DATE '2026-06-01', hire_date)
+    ) AS tenure_years,
+    CASE
+        WHEN EXTRACT(
+            YEAR FROM AGE(DATE '2026-06-01', hire_date)
+        ) >= 5 THEN 'Veteran'
+        ELSE 'Regular'
+    END AS tenure_band
+FROM employees
+ORDER BY employee_id;`,
+    explanation:
+      "AGE measures the interval between a fixed reference date and each hire date, and EXTRACT YEAR truncates it to whole years. Reusing the same expression inside CASE turns that number into a readable tenure band without extra subqueries.",
 
     starterCode: `SELECT
     employee_name,
@@ -2322,6 +2552,25 @@ ORDER BY employee_id;`,
     tags: ["ROW_NUMBER", "PARTITION BY", "CTE"],
     companies: ["Amazon", "Meta"],
     solved: false,
+
+    hint: "Rank within categories in a CTE, filter rank in the outer query.",
+    solutionCode: `WITH ranked_products AS (
+    SELECT
+        product_name,
+        category,
+        revenue,
+        ROW_NUMBER() OVER (
+            PARTITION BY category
+            ORDER BY revenue DESC
+        ) AS category_rank
+    FROM sales
+)
+SELECT product_name, category, revenue, category_rank
+FROM ranked_products
+WHERE category_rank <= 2
+ORDER BY category, category_rank;`,
+    explanation:
+      "Window functions cannot appear in WHERE, so a CTE first materializes the per-category rank and the outer query filters on it like an ordinary column. Partitioning restarts numbering per category while the descending order puts each category winner first.",
 
     starterCode: `WITH ranked_products AS (
     SELECT
@@ -2446,6 +2695,27 @@ ORDER BY category, category_rank;`,
     companies: ["Stripe", "Uber"],
     solved: false,
 
+    hint: "Carry last month's revenue forward with LAG, then compute the percent change.",
+    solutionCode: `WITH monthly AS (
+    SELECT
+        TO_CHAR(order_date, 'YYYY-MM') AS month,
+        SUM(amount) AS revenue
+    FROM orders
+    GROUP BY 1
+)
+SELECT
+    month,
+    revenue,
+    ROUND(
+        (revenue - LAG(revenue) OVER (ORDER BY month)) * 100.0
+            / LAG(revenue) OVER (ORDER BY month),
+        1
+    ) AS growth_pct
+FROM monthly
+ORDER BY month;`,
+    explanation:
+      "LAG reads the previous ordered row, which turns a month-over-month comparison into plain row arithmetic. The first month has no predecessor so its growth stays NULL, and multiplying by 100.0 keeps the division in decimal rather than integer math.",
+
     starterCode: `WITH monthly AS (
     SELECT
         TO_CHAR(order_date, 'YYYY-MM') AS month,
@@ -2561,6 +2831,20 @@ ORDER BY month;`,
     tags: ["NOT EXISTS", "ORDER BY"],
     companies: ["Shopify", "Amazon"],
     solved: false,
+
+    hint: "Keep products with no matching order row via NOT EXISTS.",
+    solutionCode: `SELECT
+    product_id,
+    product_name
+FROM products AS p
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM order_items AS oi
+    WHERE oi.product_id = p.product_id
+)
+ORDER BY product_id;`,
+    explanation:
+      "A correlated NOT EXISTS checks each product against the orders table one by one and keeps only those with no match. Unlike NOT IN, it stays correct when the other side contains NULLs, making it the safe anti-join pattern.",
 
     starterCode: `SELECT
     product_id,
@@ -2679,6 +2963,27 @@ ORDER BY product_id;`,
     tags: ["CTE", "LEFT JOIN", "COUNT", "ROUND"],
     companies: ["Airbnb", "Spotify"],
     solved: false,
+
+    hint: "Deduplicate buyers in a CTE, left-join to signups, then compute the rate.",
+    solutionCode: `WITH user_orders AS (
+    SELECT DISTINCT user_id
+    FROM orders
+)
+SELECT
+    TO_CHAR(users.signup_date, 'YYYY-MM') AS month,
+    COUNT(*) AS signups,
+    COUNT(user_orders.user_id) AS buyers,
+    ROUND(
+        COUNT(user_orders.user_id) * 100.0 / COUNT(*),
+        1
+    ) AS conversion_pct
+FROM users
+LEFT JOIN user_orders
+    ON user_orders.user_id = users.user_id
+GROUP BY 1
+ORDER BY 1;`,
+    explanation:
+      "Deduplicating buyers first prevents repeat orders from inflating the count. The LEFT JOIN preserves signups with no orders, and COUNT on the joined column skips those NULLs while COUNT(*) counts everyone — the ratio of the two is the conversion rate.",
 
     starterCode: `WITH user_orders AS (
     SELECT DISTINCT user_id
@@ -2825,6 +3130,21 @@ ORDER BY 1;`,
     tags: ["CORRELATED SUBQUERY", "AVG", "ORDER BY"],
     companies: ["Google", "Meta"],
     solved: false,
+
+    hint: "Compare each salary to its own department's average via a correlated subquery.",
+    solutionCode: `SELECT
+    employee_name,
+    department,
+    salary
+FROM employees AS e
+WHERE salary > (
+    SELECT AVG(salary)
+    FROM employees
+    WHERE department = e.department
+)
+ORDER BY salary DESC;`,
+    explanation:
+      "A correlated subquery re-runs once per outer row, using that row's department to compute a local average instead of one global number. Each employee is therefore measured against their own department's pay level, not the company's.",
 
     starterCode: `SELECT
     employee_name,
