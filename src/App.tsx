@@ -64,6 +64,8 @@ function App() {
     useState("All");
   const [selectedStatus, setSelectedStatus] =
     useState("All");
+  const [selectedCategory, setSelectedCategory] =
+    useState("All");
 
   const [solvedQuestionIds, setSolvedQuestionIds] =
     useState<Set<string>>(
@@ -126,6 +128,7 @@ function App() {
     selectedLanguage,
     selectedCompany,
     selectedStatus,
+    selectedCategory,
     showBookmarkedOnly,
   ]);
 
@@ -242,6 +245,19 @@ function App() {
 
   const statuses = ["All", "Solved", "Unsolved"];
 
+  const categories = [
+    "All",
+    ...Array.from(
+      new Set(
+        allQuestions
+          .map((question) => question.category)
+          .filter(
+            (category) => category.trim() !== "",
+          ),
+      ),
+    ).sort((a, b) => a.localeCompare(b)),
+  ];
+
   const filteredQuestions = useMemo(() => {
     const normalizedSearch =
       searchTerm.trim().toLowerCase();
@@ -296,6 +312,10 @@ function App() {
           ? solvedQuestionIds.has(question.id)
           : !solvedQuestionIds.has(question.id));
 
+      const matchesCategory =
+        selectedCategory === "All" ||
+        question.category === selectedCategory;
+
       return (
         matchesBookmark &&
         matchesSearch &&
@@ -303,7 +323,8 @@ function App() {
         matchesQuestionType &&
         matchesLanguage &&
         matchesCompany &&
-        matchesStatus
+        matchesStatus &&
+        matchesCategory
       );
     });
   }, [
@@ -314,6 +335,7 @@ function App() {
     selectedLanguage,
     selectedCompany,
     selectedStatus,
+    selectedCategory,
     solvedQuestionIds,
     showBookmarkedOnly,
     bookmarkedQuestionIds,
@@ -373,7 +395,8 @@ function App() {
     selectedQuestionType !== "All" ||
     selectedLanguage !== "All" ||
     selectedCompany !== "All" ||
-    selectedStatus !== "All";
+    selectedStatus !== "All" ||
+    selectedCategory !== "All";
 
   const clearFilters = () => {
     setSearchTerm("");
@@ -382,6 +405,7 @@ function App() {
     setSelectedLanguage("All");
     setSelectedCompany("All");
     setSelectedStatus("All");
+    setSelectedCategory("All");
   };
 
   return (
@@ -594,11 +618,13 @@ function App() {
             }
             selectedCompany={selectedCompany}
             selectedStatus={selectedStatus}
+            selectedCategory={selectedCategory}
             questionTypes={questionTypes}
             difficulties={difficulties}
             languages={languages}
             companies={companies}
             statuses={statuses}
+            categories={categories}
             hasActiveFilters={hasActiveFilters}
             setSearchTerm={setSearchTerm}
             setSelectedQuestionType={
@@ -614,6 +640,9 @@ function App() {
               setSelectedCompany
             }
             setSelectedStatus={setSelectedStatus}
+            setSelectedCategory={
+              setSelectedCategory
+            }
             clearFilters={clearFilters}
           />
 

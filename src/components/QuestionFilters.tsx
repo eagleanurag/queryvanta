@@ -7,11 +7,13 @@ type QuestionFiltersProps = {
   selectedLanguage: string;
   selectedCompany: string;
   selectedStatus: string;
+  selectedCategory: string;
   questionTypes: string[];
   difficulties: string[];
   languages: string[];
   companies: string[];
   statuses: string[];
+  categories: string[];
   hasActiveFilters: boolean;
   setSearchTerm: (value: string) => void;
   setSelectedQuestionType: (value: string) => void;
@@ -19,6 +21,7 @@ type QuestionFiltersProps = {
   setSelectedLanguage: (value: string) => void;
   setSelectedCompany: (value: string) => void;
   setSelectedStatus: (value: string) => void;
+  setSelectedCategory: (value: string) => void;
   clearFilters: () => void;
 };
 
@@ -29,11 +32,13 @@ function QuestionFilters({
   selectedLanguage,
   selectedCompany,
   selectedStatus,
+  selectedCategory,
   questionTypes,
   difficulties,
   languages,
   companies,
   statuses,
+  categories,
   hasActiveFilters,
   setSearchTerm,
   setSelectedQuestionType,
@@ -41,6 +46,7 @@ function QuestionFilters({
   setSelectedLanguage,
   setSelectedCompany,
   setSelectedStatus,
+  setSelectedCategory,
   clearFilters,
 }: QuestionFiltersProps) {
   return (
@@ -110,6 +116,35 @@ function QuestionFilters({
                 value={type}
               >
                 {type}
+              </option>
+            ))}
+        </select>
+
+        {/* Category */}
+        <select
+          value={selectedCategory}
+          onChange={(event) =>
+            setSelectedCategory(
+              event.target.value,
+            )
+          }
+          className="min-w-[145px] cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-600 outline-none hover:bg-gray-50"
+        >
+          <option value="All">
+            All Categories
+          </option>
+
+          {categories
+            .filter(
+              (category) =>
+                category !== "All",
+            )
+            .map((category) => (
+              <option
+                key={category}
+                value={category}
+              >
+                {category}
               </option>
             ))}
         </select>
