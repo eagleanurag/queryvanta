@@ -196,7 +196,12 @@ function PracticeHistoryList() {
                       ? "question"
                       : "questions"}{" "}
                     · {entry.completedCount}{" "}
-                    completed · {completionRate}%
+                    completed · {completionRate}% ·{" "}
+                    Order:{" "}
+                    {entry.selectionMode ===
+                    "random"
+                      ? "Random"
+                      : "Sequential"}
                   </p>
 
                   <div className="mt-2">

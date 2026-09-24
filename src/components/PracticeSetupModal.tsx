@@ -2,13 +2,37 @@ import { useEffect, useRef, useState } from "react";
 
 import { Play, X } from "lucide-react";
 
+import type { PracticeSelectionMode } from "../lib/practiceSession";
+
 export const PRACTICE_SIZE_OPTIONS = [
   5, 10, 20,
 ] as const;
 
+const SELECTION_MODES: {
+  value: PracticeSelectionMode;
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: "sequential",
+    label: "Sequential",
+    description:
+      "Use the current question order.",
+  },
+  {
+    value: "random",
+    label: "Random",
+    description:
+      "Shuffle questions when the session starts.",
+  },
+];
+
 type PracticeSetupModalProps = {
   availableCount: number;
-  onStart: (size: number) => void;
+  onStart: (
+    size: number,
+    mode: PracticeSelectionMode,
+  ) => void;
   onClose: () => void;
 };
 
@@ -30,6 +54,11 @@ function PracticeSetupModal({
   const [selectedSize, setSelectedSize] =
     useState<number>(() =>
       defaultSize(availableCount),
+    );
+
+  const [selectedMode, setSelectedMode] =
+    useState<PracticeSelectionMode>(
+      "sequential",
     );
 
   const dialogRef =
@@ -167,6 +196,53 @@ function PracticeSetupModal({
           </div>
         </div>
 
+        <div className="mt-5">
+          <p
+            id="practice-order-label"
+            className="text-sm font-medium text-gray-700"
+          >
+            Question order
+          </p>
+
+          <div
+            role="radiogroup"
+            aria-labelledby="practice-order-label"
+            className="mt-2 grid grid-cols-2 gap-2"
+          >
+            {SELECTION_MODES.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={
+                  selectedMode === option.value
+                }
+                onClick={() =>
+                  setSelectedMode(option.value)
+                }
+                className={`rounded-lg border px-4 py-2.5 text-left transition ${
+                  selectedMode === option.value
+                    ? "border-gray-900 bg-gray-900 text-white"
+                    : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                <span className="block text-sm font-medium">
+                  {option.label}
+                </span>
+                <span
+                  className={`mt-0.5 block text-xs ${
+                    selectedMode === option.value
+                      ? "text-gray-300"
+                      : "text-gray-400"
+                  }`}
+                >
+                  {option.description}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="mt-6 flex items-center justify-end gap-2">
           <button
             type="button"
@@ -179,7 +255,7 @@ function PracticeSetupModal({
           <button
             type="button"
             onClick={() =>
-              onStart(effectiveSize)
+              onStart(effectiveSize, selectedMode)
             }
             className="flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
           >

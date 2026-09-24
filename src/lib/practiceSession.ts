@@ -16,6 +16,10 @@ export type PracticeSessionStatus =
   | "active"
   | "finished";
 
+export type PracticeSelectionMode =
+  | "sequential"
+  | "random";
+
 export type PracticeSession = {
   sessionId: string;
   questionIds: string[];
@@ -24,6 +28,7 @@ export type PracticeSession = {
   completedQuestionIds: string[];
   launchSearch: string;
   availableCount: number;
+  selectionMode: PracticeSelectionMode;
   status: PracticeSessionStatus;
   finishedAt?: number;
 };
@@ -133,6 +138,10 @@ function sanitizeSession(
       raw.availableCount >= questionIds.length
         ? Math.floor(raw.availableCount)
         : questionIds.length,
+    selectionMode:
+      raw.selectionMode === "random"
+        ? "random"
+        : "sequential",
     status,
     ...(finishedAt === undefined
       ? {}
@@ -206,6 +215,7 @@ export function createPracticeSession(
   questionIds: string[],
   launchSearch: string,
   availableCount: number,
+  selectionMode: PracticeSelectionMode = "sequential",
 ): PracticeSession | null {
   const cleanIds = questionIds
     .filter(isNonEmptyString)
@@ -227,12 +237,59 @@ export function createPracticeSession(
       availableCount >= cleanIds.length
         ? Math.floor(availableCount)
         : cleanIds.length,
+    selectionMode,
     status: "active",
   };
 
   writeSession(session);
 
   return session;
+}
+
+/**
+ * Select session question IDs from a source list.
+ * Sequential preserves source order; random shuffles
+ * once with Fisher-Yates. Always returns distinct IDs
+ * within the source set, capped at the source length.
+ */
+export function selectSessionQuestionIds(
+  sourceIds: string[],
+  size: number,
+  mode: PracticeSelectionMode,
+): string[] {
+  const cleanIds = Array.from(
+    new Set(
+      sourceIds
+        .filter(isNonEmptyString)
+        .map((id) => id.trim()),
+    ),
+  );
+
+  const count = Math.min(
+    Math.max(Math.floor(size), 0),
+    cleanIds.length,
+  );
+
+  if (mode !== "random") {
+    return cleanIds.slice(0, count);
+  }
+
+  const shuffled = [...cleanIds];
+
+  for (
+    let index = shuffled.length - 1;
+    index > 0;
+    index -= 1
+  ) {
+    const otherIndex = Math.floor(
+      Math.random() * (index + 1),
+    );
+    const temporary = shuffled[index];
+    shuffled[index] = shuffled[otherIndex];
+    shuffled[otherIndex] = temporary;
+  }
+
+  return shuffled.slice(0, count);
 }
 
 export function savePracticeSession(
@@ -321,6 +378,7 @@ export type PracticeHistoryEntry = {
   completedCount: number;
   availableCount: number;
   launchSearch: string;
+  selectionMode: PracticeSelectionMode;
   status: PracticeSessionStatus;
 };
 
@@ -425,6 +483,10 @@ function sanitizeHistoryEntry(
       typeof raw.launchSearch === "string"
         ? raw.launchSearch
         : "",
+    selectionMode:
+      raw.selectionMode === "random"
+        ? "random"
+        : "sequential",
     status: "finished",
   };
 }
@@ -538,6 +600,7 @@ export function recordFinishedSession(
       session.completedQuestionIds,
     availableCount: session.availableCount,
     launchSearch: session.launchSearch,
+    selectionMode: session.selectionMode,
   });
 
   if (!entry) {

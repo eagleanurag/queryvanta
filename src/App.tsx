@@ -41,7 +41,10 @@ import {
 import QuestionCard from "./components/QuestionCard";
 import QuestionFilters from "./components/QuestionFilters";
 import PracticeSetupModal from "./components/PracticeSetupModal";
-import { createPracticeSession } from "./lib/practiceSession";
+import {
+  createPracticeSession,
+  selectSessionQuestionIds,
+} from "./lib/practiceSession";
 import type { DiscoveryFilters } from "./lib/questionFilter";
 import {
   DEFAULT_FILTERS,
@@ -1076,20 +1079,23 @@ function App() {
             onClose={() =>
               setPracticeSource(null)
             }
-            onStart={(size) => {
+            onStart={(size, mode) => {
               const selectedIds =
-                practiceQuestions
-                  .slice(0, size)
-                  .map(
+                selectSessionQuestionIds(
+                  practiceQuestions.map(
                     (question) =>
                       question.id,
-                  );
+                  ),
+                  size,
+                  mode,
+                );
 
               const session =
                 createPracticeSession(
                   selectedIds,
                   practiceSearch,
                   practiceQuestions.length,
+                  mode,
                 );
 
               setPracticeSource(null);

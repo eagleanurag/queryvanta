@@ -191,7 +191,10 @@ function PracticeHistoryDetailPage() {
                 ? "Question"
                 : "Questions"}{" "}
               · {entry.completedCount} Completed ·{" "}
-              {notCompleted} Not Completed
+              {notCompleted} Not Completed · Order:{" "}
+              {entry.selectionMode === "random"
+                ? "Random"
+                : "Sequential"}
             </p>
 
             <p className="mt-4 text-3xl font-semibold text-gray-900">

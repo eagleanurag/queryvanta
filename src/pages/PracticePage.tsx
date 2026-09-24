@@ -281,7 +281,12 @@ function PracticePage() {
                       ? "Question"
                       : "Questions"}{" "}
                     · {completedCount} Completed ·{" "}
-                    {notCompleted} Not Completed
+                    {notCompleted} Not Completed ·
+                    Order:{" "}
+                    {session.selectionMode ===
+                    "random"
+                      ? "Random"
+                      : "Sequential"}
                   </p>
 
                   <p className="mt-4 text-3xl font-semibold text-gray-900">
