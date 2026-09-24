@@ -44,10 +44,22 @@ import PracticeSetupModal from "./components/PracticeSetupModal";
 import { createPracticeSession } from "./lib/practiceSession";
 import type { DiscoveryFilters } from "./lib/questionFilter";
 import {
+  DEFAULT_FILTERS,
   filterQuestions,
   filtersToSearchParams,
   parseFilterSearchParams,
 } from "./lib/questionFilter";
+
+type PracticeSource = "filtered" | "bookmarked";
+
+// Canonical discovery context for bookmarked-only
+// practice: Back to Questions returns to the
+// bookmarked-filtered Questions view.
+const BOOKMARKED_DISCOVERY_SEARCH =
+  filtersToSearchParams({
+    ...DEFAULT_FILTERS,
+    bookmarkedOnly: true,
+  }).toString();
 
 const navigation = [
   { label: "Home", icon: Home },
@@ -72,8 +84,8 @@ function App() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [isPracticeSetupOpen, setIsPracticeSetupOpen] =
-    useState(false);
+  const [practiceSource, setPracticeSource] =
+    useState<PracticeSource | null>(null);
 
   const [initialFilters] =
     useState<DiscoveryFilters>(() =>
@@ -242,7 +254,7 @@ function App() {
     } | null;
 
     if (state?.openPracticeSetup) {
-      setIsPracticeSetupOpen(true);
+      setPracticeSource("filtered");
       navigate(
         location.pathname + location.search,
         { replace: true },
@@ -410,6 +422,31 @@ function App() {
   );
 
   const totalQuestions = allQuestions.length;
+
+  // Canonical bookmarked collection in
+  // Questions-page ordering, used as the source
+  // set for bookmarked practice sessions.
+  const bookmarkedQuestions = useMemo(
+    () =>
+      allQuestions.filter((question) =>
+        bookmarkedQuestionIds.has(question.id),
+      ),
+    [allQuestions, bookmarkedQuestionIds],
+  );
+
+  // Question list + discovery context for the
+  // currently open practice setup. Snapshots are
+  // frozen at session start; later bookmark or
+  // filter changes cannot mutate the session.
+  const practiceQuestions =
+    practiceSource === "bookmarked"
+      ? bookmarkedQuestions
+      : filteredQuestions;
+
+  const practiceSearch =
+    practiceSource === "bookmarked"
+      ? BOOKMARKED_DISCOVERY_SEARCH
+      : discoverySearch;
 
   const totalPages = Math.max(
     1,
@@ -761,9 +798,7 @@ function App() {
                     <button
                       type="button"
                       onClick={() =>
-                        setIsPracticeSetupOpen(
-                          true,
-                        )
+                        setPracticeSource("filtered")
                       }
                       disabled={
                         filteredQuestions.length ===
@@ -773,6 +808,33 @@ function App() {
                     >
                       <Play size={12} />
                       Start Practice
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPracticeSource(
+                          "bookmarked",
+                        )
+                      }
+                      disabled={
+                        bookmarkedQuestions.length ===
+                        0
+                      }
+                      title={
+                        bookmarkedQuestions.length ===
+                        0
+                          ? "No bookmarked questions to practice."
+                          : `Practice ${bookmarkedQuestions.length} bookmarked question${bookmarkedQuestions.length === 1 ? "" : "s"}`
+                      }
+                      className="flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
+                    >
+                      <Star
+                        size={12}
+                        fill="currentColor"
+                        className="text-amber-500"
+                      />
+                      Practice Bookmarked
                     </button>
 
                     <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-600">
@@ -1005,18 +1067,18 @@ function App() {
         </div>
       </main>
 
-      {isPracticeSetupOpen &&
-        filteredQuestions.length > 0 && (
+      {practiceSource !== null &&
+        practiceQuestions.length > 0 && (
           <PracticeSetupModal
             availableCount={
-              filteredQuestions.length
+              practiceQuestions.length
             }
             onClose={() =>
-              setIsPracticeSetupOpen(false)
+              setPracticeSource(null)
             }
             onStart={(size) => {
               const selectedIds =
-                filteredQuestions
+                practiceQuestions
                   .slice(0, size)
                   .map(
                     (question) =>
@@ -1026,11 +1088,11 @@ function App() {
               const session =
                 createPracticeSession(
                   selectedIds,
-                  discoverySearch,
-                  filteredQuestions.length,
+                  practiceSearch,
+                  practiceQuestions.length,
                 );
 
-              setIsPracticeSetupOpen(false);
+              setPracticeSource(null);
 
               if (session) {
                 navigate("/practice");
