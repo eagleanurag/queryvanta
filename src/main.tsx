@@ -8,6 +8,7 @@ import {
 
 import App from "./App";
 import AdminPage from "./pages/AdminPage";
+import PracticePage from "./pages/PracticePage";
 import ProgressPage from "./pages/ProgressPage";
 import PySparkTestPage from "./pages/PySparkTestPage";
 import QuestionPage from "./pages/QuestionPage";
@@ -21,6 +22,11 @@ createRoot(document.getElementById("root")!).render(
         <Route path="/" element={<App />} />
 
         <Route path="/admin" element={<AdminPage />} />
+
+        <Route
+          path="/practice"
+          element={<PracticePage />}
+        />
 
         <Route
           path="/progress"

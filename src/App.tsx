@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { Link, useSearchParams } from "react-router-dom";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
 
 import {
   BarChart3,
@@ -11,6 +16,7 @@ import {
   Code2,
   FolderKanban,
   Home,
+  Play,
   Search,
   Settings,
   Star,
@@ -34,6 +40,8 @@ import {
 } from "./lib/bookmarks";
 import QuestionCard from "./components/QuestionCard";
 import QuestionFilters from "./components/QuestionFilters";
+import PracticeSetupModal from "./components/PracticeSetupModal";
+import { createPracticeSession } from "./lib/practiceSession";
 import type { DiscoveryFilters } from "./lib/questionFilter";
 import {
   filterQuestions,
@@ -61,6 +69,11 @@ const PAGE_SIZE = 10;
 function App() {
   const [searchParams, setSearchParams] =
     useSearchParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const [isPracticeSetupOpen, setIsPracticeSetupOpen] =
+    useState(false);
 
   const [initialFilters] =
     useState<DiscoveryFilters>(() =>
@@ -222,6 +235,21 @@ function App() {
       showBookmarkedOnly,
     ],
   );
+
+  useEffect(() => {
+    const state = location.state as {
+      openPracticeSetup?: boolean;
+    } | null;
+
+    if (state?.openPracticeSetup) {
+      setIsPracticeSetupOpen(true);
+      navigate(
+        location.pathname + location.search,
+        { replace: true },
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const syncProgress = () => {
@@ -729,9 +757,28 @@ function App() {
                     </p>
                   </div>
 
-                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-600">
-                    {solvedQuestions} Solved
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setIsPracticeSetupOpen(
+                          true,
+                        )
+                      }
+                      disabled={
+                        filteredQuestions.length ===
+                        0
+                      }
+                      className="flex items-center gap-1.5 rounded-full bg-gray-900 px-3 py-1 text-xs font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-gray-900"
+                    >
+                      <Play size={12} />
+                      Start Practice
+                    </button>
+
+                    <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-600">
+                      {solvedQuestions} Solved
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -957,6 +1004,40 @@ function App() {
           </div>
         </div>
       </main>
+
+      {isPracticeSetupOpen &&
+        filteredQuestions.length > 0 && (
+          <PracticeSetupModal
+            availableCount={
+              filteredQuestions.length
+            }
+            onClose={() =>
+              setIsPracticeSetupOpen(false)
+            }
+            onStart={(size) => {
+              const selectedIds =
+                filteredQuestions
+                  .slice(0, size)
+                  .map(
+                    (question) =>
+                      question.id,
+                  );
+
+              const session =
+                createPracticeSession(
+                  selectedIds,
+                  discoverySearch,
+                  filteredQuestions.length,
+                );
+
+              setIsPracticeSetupOpen(false);
+
+              if (session) {
+                navigate("/practice");
+              }
+            }}
+          />
+        )}
     </div>
   );
 }

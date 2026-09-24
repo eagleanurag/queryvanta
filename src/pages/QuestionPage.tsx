@@ -313,8 +313,22 @@ function SchemaTable({
   );
 }
 
-function QuestionPage() {
-  const { questionId } = useParams();
+type QuestionPageProps = {
+  embeddedQuestionId?: string;
+  hideChrome?: boolean;
+  onSolved?: (questionId: string) => void;
+};
+
+function QuestionPage({
+  embeddedQuestionId,
+  hideChrome = false,
+  onSolved,
+}: QuestionPageProps = {}) {
+  const { questionId: routeQuestionId } =
+    useParams();
+
+  const questionId =
+    embeddedQuestionId ?? routeQuestionId;
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -743,6 +757,8 @@ function QuestionPage() {
             currentQuestion.id,
           );
 
+          onSolved?.(currentQuestion.id);
+
           setIsSolved(true);
         }
       }
@@ -929,6 +945,8 @@ function QuestionPage() {
               currentQuestion.id,
             );
 
+            onSolved?.(currentQuestion.id);
+
             setIsSolved(true);
           }
         }
@@ -1098,6 +1116,7 @@ function QuestionPage() {
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+      {!hideChrome && (
       <header className="border-b border-gray-200 bg-white">
         <div className="flex h-[72px] items-center px-8">
           {isPreview ? (
@@ -1157,6 +1176,7 @@ function QuestionPage() {
           )}
         </div>
       </header>
+      )}
 
       <main className="p-8">
         <div className="mx-auto max-w-[1400px]">
@@ -1918,7 +1938,7 @@ function QuestionPage() {
             </div>
           </section>
 
-          {!isPreview && (
+          {!isPreview && !hideChrome && (
             <nav className="mt-6 flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <button
               type="button"
