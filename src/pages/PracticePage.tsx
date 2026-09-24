@@ -36,6 +36,7 @@ import {
 import type { PracticeSession } from "../lib/practiceSession";
 
 import QuestionPage from "./QuestionPage";
+import PracticeSessionReview from "../components/PracticeSessionReview";
 
 function PracticePage() {
   const navigate = useNavigate();
@@ -151,6 +152,12 @@ function PracticePage() {
     ).length;
   }, [session, validQuestionIds]);
 
+  const completedIds = useMemo(
+    () =>
+      new Set(session?.completedQuestionIds ?? []),
+    [session],
+  );
+
   useEffect(() => {
     if (!session || !currentQuestionId) {
       return;
@@ -242,7 +249,7 @@ function PracticePage() {
         </header>
 
         <main className="p-8">
-          <div className="mx-auto max-w-xl">
+          <div className="mx-auto max-w-2xl">
             <section className="rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
               <span className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
                 <CheckCircle2 size={24} />
@@ -324,6 +331,19 @@ function PracticePage() {
                 </Link>
               </div>
             </section>
+
+            {session.questionIds.length > 0 && (
+              <PracticeSessionReview
+                questionIds={
+                  session.questionIds
+                }
+                completedIds={completedIds}
+                questionById={questionById}
+                launchSearch={
+                  session.launchSearch
+                }
+              />
+            )}
           </div>
         </main>
       </div>
