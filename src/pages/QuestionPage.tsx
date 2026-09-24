@@ -335,7 +335,7 @@ function QuestionPage({
   const locationState = location.state as {
     previewQuestion?: Question;
     formDraft?: AdminFormDraft;
-    fromPracticeReview?: boolean;
+    fromPracticeReview?: string;
   } | null;
 
   const previewQuestion =
@@ -1162,7 +1162,10 @@ function QuestionPage({
                   <div className="mx-4 h-5 w-px bg-gray-200" />
 
                   <Link
-                    to="/practice"
+                    to={
+                      locationState?.fromPracticeReview ??
+                      "/practice"
+                    }
                     className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900"
                   >
                     <ArrowLeft size={17} />

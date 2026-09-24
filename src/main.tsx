@@ -8,6 +8,7 @@ import {
 
 import App from "./App";
 import AdminPage from "./pages/AdminPage";
+import PracticeHistoryDetailPage from "./pages/PracticeHistoryDetailPage";
 import PracticePage from "./pages/PracticePage";
 import ProgressPage from "./pages/ProgressPage";
 import PySparkTestPage from "./pages/PySparkTestPage";
@@ -26,6 +27,11 @@ createRoot(document.getElementById("root")!).render(
         <Route
           path="/practice"
           element={<PracticePage />}
+        />
+
+        <Route
+          path="/practice/history/:sessionId"
+          element={<PracticeHistoryDetailPage />}
         />
 
         <Route

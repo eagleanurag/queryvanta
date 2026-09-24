@@ -36,6 +36,7 @@ import {
 import type { PracticeSession } from "../lib/practiceSession";
 
 import QuestionPage from "./QuestionPage";
+import PracticeHistoryList from "../components/PracticeHistoryList";
 import PracticeSessionReview from "../components/PracticeSessionReview";
 
 function PracticePage() {
@@ -177,30 +178,36 @@ function PracticePage() {
   if (!session) {
     return (
       <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
-        <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center p-8 text-center">
-          <Target
-            size={32}
-            className="text-gray-300"
-          />
+        <main className="p-8">
+          <div className="mx-auto max-w-2xl">
+            <div className="flex flex-col items-center px-8 py-12 text-center">
+              <Target
+                size={32}
+                className="text-gray-300"
+              />
 
-          <h1 className="mt-4 text-xl font-semibold text-gray-900">
-            No active practice session
-          </h1>
+              <h1 className="mt-4 text-xl font-semibold text-gray-900">
+                No active practice session
+              </h1>
 
-          <p className="mt-2 text-sm leading-6 text-gray-500">
-            Start a practice session from the
-            Questions page to solve a focused
-            set of questions.
-          </p>
+              <p className="mt-2 text-sm leading-6 text-gray-500">
+                Start a practice session from
+                the Questions page to solve a
+                focused set of questions.
+              </p>
 
-          <Link
-            to="/"
-            className="mt-6 inline-flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-          >
-            <ArrowLeft size={16} />
-            Back to Questions
-          </Link>
-        </div>
+              <Link
+                to="/"
+                className="mt-6 inline-flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+              >
+                <ArrowLeft size={16} />
+                Back to Questions
+              </Link>
+            </div>
+
+            <PracticeHistoryList />
+          </div>
+        </main>
       </div>
     );
   }

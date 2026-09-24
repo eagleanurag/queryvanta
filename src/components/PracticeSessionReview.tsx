@@ -21,6 +21,7 @@ type PracticeSessionReviewProps = {
   completedIds: Set<string>;
   questionById: Map<string, Question>;
   launchSearch: string;
+  reviewReturnPath?: string;
 };
 
 function PracticeSessionReview({
@@ -28,6 +29,7 @@ function PracticeSessionReview({
   completedIds,
   questionById,
   launchSearch,
+  reviewReturnPath = "/practice",
 }: PracticeSessionReviewProps) {
   const [filter, setFilter] =
     useState<ReviewFilter>("all");
@@ -106,7 +108,9 @@ function PracticeSessionReview({
             pathname: `/question/${firstUncompleted.id}`,
             search: reviewSearch,
           }}
-          state={{ fromPracticeReview: true }}
+          state={{
+            fromPracticeReview: reviewReturnPath,
+          }}
           className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
         >
           Review {notCompletedTotal}{" "}
@@ -224,7 +228,8 @@ function PracticeSessionReview({
                       search: reviewSearch,
                     }}
                     state={{
-                      fromPracticeReview: true,
+                      fromPracticeReview:
+                        reviewReturnPath,
                     }}
                     aria-label={`Review ${entry.question.title}`}
                     className="flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"

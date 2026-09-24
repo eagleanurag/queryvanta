@@ -1,8 +1,16 @@
 const STORAGE_KEY =
   "queryvanta-practice-session";
 
+const HISTORY_STORAGE_KEY =
+  "queryvanta-practice-history";
+
 const PRACTICE_SESSION_EVENT =
   "queryvanta-practice-session-changed";
+
+const PRACTICE_HISTORY_EVENT =
+  "queryvanta-practice-history-changed";
+
+export const MAX_PRACTICE_HISTORY_ENTRIES = 20;
 
 export type PracticeSessionStatus =
   | "active"
@@ -285,10 +293,16 @@ export function finishPracticeSession(
   const updated: PracticeSession = {
     ...session,
     status: "finished",
-    finishedAt: Date.now(),
+    finishedAt:
+      session.status === "finished" &&
+      typeof session.finishedAt === "number" &&
+      Number.isFinite(session.finishedAt)
+        ? session.finishedAt
+        : Date.now(),
   };
 
   writeSession(updated);
+  recordFinishedSession(updated);
 
   return updated;
 }
@@ -297,4 +311,252 @@ export function clearPracticeSession(): void {
   writeSession(null);
 }
 
+export type PracticeHistoryEntry = {
+  sessionId: string;
+  startedAt: number;
+  finishedAt: number;
+  questionIds: string[];
+  totalQuestions: number;
+  completedQuestionIds: string[];
+  completedCount: number;
+  availableCount: number;
+  launchSearch: string;
+  status: PracticeSessionStatus;
+};
+
+export type PracticeHistoryStatus =
+  | "Completed"
+  | "Partially Completed"
+  | "Not Completed";
+
+export function getPracticeHistoryStatus(
+  entry: Pick<
+    PracticeHistoryEntry,
+    "totalQuestions" | "completedCount"
+  >,
+): PracticeHistoryStatus {
+  if (entry.totalQuestions <= 0) {
+    return "Not Completed";
+  }
+
+  if (
+    entry.completedCount >= entry.totalQuestions
+  ) {
+    return "Completed";
+  }
+
+  if (entry.completedCount <= 0) {
+    return "Not Completed";
+  }
+
+  return "Partially Completed";
+}
+
+function sanitizeHistoryEntry(
+  value: unknown,
+): PracticeHistoryEntry | null {
+  if (
+    typeof value !== "object" ||
+    value === null
+  ) {
+    return null;
+  }
+
+  const raw = value as Record<string, unknown>;
+
+  if (!isNonEmptyString(raw.sessionId)) {
+    return null;
+  }
+
+  if (
+    !Array.isArray(raw.questionIds) ||
+    raw.questionIds.length === 0 ||
+    !raw.questionIds.every(isNonEmptyString)
+  ) {
+    return null;
+  }
+
+  if (
+    typeof raw.finishedAt !== "number" ||
+    !Number.isFinite(raw.finishedAt)
+  ) {
+    return null;
+  }
+
+  const questionIds = (
+    raw.questionIds as string[]
+  ).map((id) => id.trim());
+
+  const completedQuestionIds = Array.from(
+    new Set(
+      (Array.isArray(raw.completedQuestionIds)
+        ? (raw.completedQuestionIds as unknown[])
+        : []
+      )
+        .filter(isNonEmptyString)
+        .map((id) => id.trim())
+        .filter((id) =>
+          questionIds.includes(id),
+        ),
+    ),
+  );
+
+  const startedAt =
+    typeof raw.startedAt === "number" &&
+    Number.isFinite(raw.startedAt)
+      ? raw.startedAt
+      : raw.finishedAt;
+
+  return {
+    sessionId: (raw.sessionId as string).trim(),
+    startedAt,
+    finishedAt: raw.finishedAt as number,
+    questionIds,
+    totalQuestions: questionIds.length,
+    completedQuestionIds,
+    completedCount: completedQuestionIds.length,
+    availableCount:
+      typeof raw.availableCount === "number" &&
+      Number.isFinite(raw.availableCount) &&
+      raw.availableCount >= questionIds.length
+        ? Math.floor(raw.availableCount)
+        : questionIds.length,
+    launchSearch:
+      typeof raw.launchSearch === "string"
+        ? raw.launchSearch
+        : "",
+    status: "finished",
+  };
+}
+
+function readHistory(): PracticeHistoryEntry[] {
+  try {
+    const storedValue =
+      window.localStorage.getItem(
+        HISTORY_STORAGE_KEY,
+      );
+
+    if (!storedValue) {
+      return [];
+    }
+
+    const parsedValue: unknown =
+      JSON.parse(storedValue);
+
+    if (!Array.isArray(parsedValue)) {
+      window.localStorage.removeItem(
+        HISTORY_STORAGE_KEY,
+      );
+
+      return [];
+    }
+
+    const entries: PracticeHistoryEntry[] = [];
+
+    for (const item of parsedValue) {
+      const entry = sanitizeHistoryEntry(item);
+
+      if (
+        entry &&
+        !entries.some(
+          (existing) =>
+            existing.sessionId ===
+            entry.sessionId,
+        )
+      ) {
+        entries.push(entry);
+      }
+    }
+
+    entries.sort(
+      (a, b) => b.finishedAt - a.finishedAt,
+    );
+
+    return entries.slice(
+      0,
+      MAX_PRACTICE_HISTORY_ENTRIES,
+    );
+  } catch {
+    try {
+      window.localStorage.removeItem(
+        HISTORY_STORAGE_KEY,
+      );
+    } catch {
+      // Ignore secondary storage failures.
+    }
+
+    return [];
+  }
+}
+
+function writeHistory(
+  entries: PracticeHistoryEntry[],
+): void {
+  try {
+    window.localStorage.setItem(
+      HISTORY_STORAGE_KEY,
+      JSON.stringify(entries),
+    );
+
+    window.dispatchEvent(
+      new Event(PRACTICE_HISTORY_EVENT),
+    );
+  } catch {
+    // Ignore storage failures so the application
+    // continues working even if localStorage is unavailable.
+  }
+}
+
+export function getPracticeHistory(): PracticeHistoryEntry[] {
+  return readHistory();
+}
+
+export function recordFinishedSession(
+  session: PracticeSession,
+): PracticeHistoryEntry[] {
+  const current = readHistory();
+
+  if (
+    current.some(
+      (entry) =>
+        entry.sessionId === session.sessionId,
+    )
+  ) {
+    return current;
+  }
+
+  const entry = sanitizeHistoryEntry({
+    sessionId: session.sessionId,
+    startedAt: session.startedAt,
+    finishedAt:
+      typeof session.finishedAt === "number" &&
+      Number.isFinite(session.finishedAt)
+        ? session.finishedAt
+        : Date.now(),
+    questionIds: session.questionIds,
+    completedQuestionIds:
+      session.completedQuestionIds,
+    availableCount: session.availableCount,
+    launchSearch: session.launchSearch,
+  });
+
+  if (!entry) {
+    return current;
+  }
+
+  const updated = [entry, ...current].slice(
+    0,
+    MAX_PRACTICE_HISTORY_ENTRIES,
+  );
+
+  writeHistory(updated);
+
+  return updated;
+}
+
+export function clearPracticeHistory(): void {
+  writeHistory([]);
+}
+
 export { PRACTICE_SESSION_EVENT };
+export { PRACTICE_HISTORY_EVENT };
