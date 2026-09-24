@@ -29,6 +29,7 @@ import {
   getBookmarkedQuestionIds,
 } from "../lib/bookmarks";
 import { computeDashboardStats } from "../lib/dashboard";
+import PracticeAnalytics from "../components/PracticeAnalytics";
 import {
   getSolvedQuestionIds,
   PROGRESS_EVENT,
@@ -502,6 +503,13 @@ function ProgressPage() {
               </ul>
             )}
           </section>
+
+          <PracticeAnalytics
+            allQuestions={[
+              ...questions,
+              ...adminQuestions,
+            ]}
+          />
 
           {stats.bookmarkedCount > 0 && (
             <p className="mt-6 flex items-center gap-2 text-xs text-gray-400">
