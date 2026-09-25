@@ -31,6 +31,33 @@ const STATUS_STYLES: Record<
   "Not Completed": "bg-gray-100 text-gray-500",
 };
 
+const ORIGIN_LABELS: Record<string, string> = {
+  standard: "Standard",
+  learning: "Learning",
+  interview: "Interview",
+  "weak-topic": "Weak Areas",
+};
+
+function originLabelFor(
+  entry: PracticeHistoryEntry,
+): string {
+  const base =
+    ORIGIN_LABELS[entry.origin ?? "standard"] ??
+    "Standard";
+
+  if (
+    (entry.origin ?? "standard") ===
+      "interview" &&
+    typeof entry.timeLimitSec === "number" &&
+    Number.isFinite(entry.timeLimitSec) &&
+    entry.timeLimitSec > 0
+  ) {
+    return `${base} · Timed`;
+  }
+
+  return base;
+}
+
 function HistoryStatusBadge({
   entry,
 }: {
@@ -201,7 +228,12 @@ function PracticeHistoryList() {
                     {entry.selectionMode ===
                     "random"
                       ? "Random"
-                      : "Sequential"}
+                      : "Sequential"}{" "}
+                    · Mode:{" "}
+                    {originLabelFor(entry)}
+                    {entry.originLabel
+                      ? ` · ${entry.originLabel}`
+                      : ""}
                   </p>
 
                   <div className="mt-2">

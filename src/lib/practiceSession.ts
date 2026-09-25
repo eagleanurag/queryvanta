@@ -20,6 +20,25 @@ export type PracticeSelectionMode =
   | "sequential"
   | "random";
 
+export type PracticeSessionOrigin =
+  | "standard"
+  | "learning"
+  | "interview"
+  | "weak-topic";
+
+const PRACTICE_ORIGINS: readonly PracticeSessionOrigin[] =
+  ["standard", "learning", "interview", "weak-topic"];
+
+function sanitizeOrigin(
+  value: unknown,
+): PracticeSessionOrigin {
+  return PRACTICE_ORIGINS.some(
+    (origin) => origin === value,
+  )
+    ? (value as PracticeSessionOrigin)
+    : "standard";
+}
+
 export type PracticeSession = {
   sessionId: string;
   questionIds: string[];
@@ -31,6 +50,19 @@ export type PracticeSession = {
   selectionMode: PracticeSelectionMode;
   status: PracticeSessionStatus;
   finishedAt?: number;
+  origin?: PracticeSessionOrigin;
+  originLabel?: string;
+  originPath?: string;
+  endsAt?: number;
+  timeLimitSec?: number;
+};
+
+export type SessionLaunchOptions = {
+  origin?: PracticeSessionOrigin;
+  originLabel?: string;
+  originPath?: string;
+  endsAt?: number;
+  timeLimitSec?: number;
 };
 
 function generateSessionId(): string {
@@ -122,6 +154,19 @@ function sanitizeSession(
       ? raw.finishedAt
       : undefined;
 
+  const endsAt =
+    typeof raw.endsAt === "number" &&
+    Number.isFinite(raw.endsAt)
+      ? raw.endsAt
+      : undefined;
+
+  const timeLimitSec =
+    typeof raw.timeLimitSec === "number" &&
+    Number.isFinite(raw.timeLimitSec) &&
+    raw.timeLimitSec > 0
+      ? Math.floor(raw.timeLimitSec)
+      : undefined;
+
   return {
     sessionId: raw.sessionId.trim(),
     questionIds,
@@ -146,6 +191,19 @@ function sanitizeSession(
     ...(finishedAt === undefined
       ? {}
       : { finishedAt }),
+    origin: sanitizeOrigin(raw.origin),
+    ...(typeof raw.originLabel === "string" &&
+    raw.originLabel.trim() !== ""
+      ? { originLabel: raw.originLabel.trim() }
+      : {}),
+    ...(typeof raw.originPath === "string" &&
+    raw.originPath.trim() !== ""
+      ? { originPath: raw.originPath.trim() }
+      : {}),
+    ...(endsAt === undefined ? {} : { endsAt }),
+    ...(timeLimitSec === undefined
+      ? {}
+      : { timeLimitSec }),
   };
 }
 
@@ -216,6 +274,7 @@ export function createPracticeSession(
   launchSearch: string,
   availableCount: number,
   selectionMode: PracticeSelectionMode = "sequential",
+  options: SessionLaunchOptions = {},
 ): PracticeSession | null {
   const cleanIds = questionIds
     .filter(isNonEmptyString)
@@ -224,6 +283,33 @@ export function createPracticeSession(
   if (cleanIds.length === 0) {
     return null;
   }
+
+  const origin = sanitizeOrigin(options.origin);
+
+  const originLabel =
+    typeof options.originLabel === "string" &&
+    options.originLabel.trim() !== ""
+      ? options.originLabel.trim()
+      : undefined;
+
+  const originPath =
+    typeof options.originPath === "string" &&
+    options.originPath.trim() !== ""
+      ? options.originPath.trim()
+      : undefined;
+
+  const endsAt =
+    typeof options.endsAt === "number" &&
+    Number.isFinite(options.endsAt)
+      ? options.endsAt
+      : undefined;
+
+  const timeLimitSec =
+    typeof options.timeLimitSec === "number" &&
+    Number.isFinite(options.timeLimitSec) &&
+    options.timeLimitSec > 0
+      ? Math.floor(options.timeLimitSec)
+      : undefined;
 
   const session: PracticeSession = {
     sessionId: generateSessionId(),
@@ -239,6 +325,17 @@ export function createPracticeSession(
         : cleanIds.length,
     selectionMode,
     status: "active",
+    origin,
+    ...(originLabel === undefined
+      ? {}
+      : { originLabel }),
+    ...(originPath === undefined
+      ? {}
+      : { originPath }),
+    ...(endsAt === undefined ? {} : { endsAt }),
+    ...(timeLimitSec === undefined
+      ? {}
+      : { timeLimitSec }),
   };
 
   writeSession(session);
@@ -380,6 +477,10 @@ export type PracticeHistoryEntry = {
   launchSearch: string;
   selectionMode: PracticeSelectionMode;
   status: PracticeSessionStatus;
+  origin: PracticeSessionOrigin;
+  originLabel?: string;
+  originPath?: string;
+  timeLimitSec?: number;
 };
 
 export type PracticeHistoryStatus =
@@ -488,6 +589,20 @@ function sanitizeHistoryEntry(
         ? "random"
         : "sequential",
     status: "finished",
+    origin: sanitizeOrigin(raw.origin),
+    ...(typeof raw.originLabel === "string" &&
+    raw.originLabel.trim() !== ""
+      ? { originLabel: raw.originLabel.trim() }
+      : {}),
+    ...(typeof raw.originPath === "string" &&
+    raw.originPath.trim() !== ""
+      ? { originPath: raw.originPath.trim() }
+      : {}),
+    ...(typeof raw.timeLimitSec === "number" &&
+    Number.isFinite(raw.timeLimitSec) &&
+    raw.timeLimitSec > 0
+      ? { timeLimitSec: Math.floor(raw.timeLimitSec) }
+      : {}),
   };
 }
 
@@ -601,6 +716,10 @@ export function recordFinishedSession(
     availableCount: session.availableCount,
     launchSearch: session.launchSearch,
     selectionMode: session.selectionMode,
+    origin: session.origin,
+    originLabel: session.originLabel,
+    originPath: session.originPath,
+    timeLimitSec: session.timeLimitSec,
   });
 
   if (!entry) {

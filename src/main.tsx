@@ -8,6 +8,10 @@ import {
 
 import App from "./App";
 import AdminPage from "./pages/AdminPage";
+import InterviewPage from "./pages/InterviewPage";
+import LearnPage from "./pages/LearnPage";
+import LearnPathPage from "./pages/LearnPathPage";
+import LearnTopicPage from "./pages/LearnTopicPage";
 import PracticeHistoryDetailPage from "./pages/PracticeHistoryDetailPage";
 import PracticePage from "./pages/PracticePage";
 import ProgressPage from "./pages/ProgressPage";
@@ -37,6 +41,23 @@ createRoot(document.getElementById("root")!).render(
         <Route
           path="/practice/history/:sessionId"
           element={<PracticeHistoryDetailPage />}
+        />
+
+        <Route path="/learn" element={<LearnPage />} />
+
+        <Route
+          path="/learn/topic/:topicId"
+          element={<LearnTopicPage />}
+        />
+
+        <Route
+          path="/learn/:pathId"
+          element={<LearnPathPage />}
+        />
+
+        <Route
+          path="/interview"
+          element={<InterviewPage />}
         />
 
         <Route

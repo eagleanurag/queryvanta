@@ -22,6 +22,7 @@ import {
   Settings,
   Star,
   Target,
+  Timer,
 } from "lucide-react";
 
 import { questions } from "./data/questions";
@@ -69,10 +70,11 @@ const BOOKMARKED_DISCOVERY_SEARCH =
 
 const navigation = [
   { label: "Home", icon: Home },
-  { label: "Learn", icon: BookOpen },
+  { label: "Learn", icon: BookOpen, to: "/learn" },
   { label: "Tracks", icon: Target },
   { label: "Projects", icon: FolderKanban },
   { label: "Progress", icon: BarChart3, to: "/progress" },
+  { label: "Interview", icon: Timer, to: "/interview" },
   {
     label: "Question Management",
     icon: Database,

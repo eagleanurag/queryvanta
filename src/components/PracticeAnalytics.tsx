@@ -104,6 +104,13 @@ function PracticeAnalytics({
     let notCompletedSessions = 0;
     let sequentialSessions = 0;
     let randomSessions = 0;
+    let standardSessions = 0;
+    let learningSessions = 0;
+    let interviewSessions = 0;
+    let weakTopicSessions = 0;
+    let timedInterviews = 0;
+    let interviewQuestions = 0;
+    let interviewCompleted = 0;
 
     const byType = new Map<string, number>();
     const byCategory = new Map<string, number>();
@@ -128,6 +135,31 @@ function PracticeAnalytics({
         randomSessions += 1;
       } else {
         sequentialSessions += 1;
+      }
+
+      const origin = entry.origin ?? "standard";
+
+      if (origin === "learning") {
+        learningSessions += 1;
+      } else if (origin === "interview") {
+        interviewSessions += 1;
+        interviewQuestions +=
+          entry.totalQuestions;
+        interviewCompleted +=
+          entry.completedCount;
+
+        if (
+          typeof entry.timeLimitSec ===
+            "number" &&
+          Number.isFinite(entry.timeLimitSec) &&
+          entry.timeLimitSec > 0
+        ) {
+          timedInterviews += 1;
+        }
+      } else if (origin === "weak-topic") {
+        weakTopicSessions += 1;
+      } else {
+        standardSessions += 1;
       }
 
       for (const questionId of entry.questionIds) {
@@ -246,6 +278,13 @@ function PracticeAnalytics({
       notCompletedSessions,
       sequentialSessions,
       randomSessions,
+      standardSessions,
+      learningSessions,
+      interviewSessions,
+      weakTopicSessions,
+      timedInterviews,
+      interviewQuestions,
+      interviewCompleted,
       typeRows,
       knownTypeTotal,
       categoryRows,
@@ -413,6 +452,104 @@ function PracticeAnalytics({
                 );
               })}
             </div>
+          </div>
+
+          <div className="mt-6">
+            <h3 className="text-sm font-semibold text-gray-900">
+              Sessions by Mode
+            </h3>
+
+            <div className="mt-3 space-y-3">
+              {(
+                [
+                  {
+                    label: "Standard Practice",
+                    count:
+                      analytics.standardSessions,
+                  },
+                  {
+                    label: "Learning",
+                    count:
+                      analytics.learningSessions,
+                  },
+                  {
+                    label: "Interview",
+                    count:
+                      analytics.interviewSessions,
+                  },
+                  {
+                    label: "Weak Areas",
+                    count:
+                      analytics.weakTopicSessions,
+                  },
+                ] as const
+              ).map((row) => {
+                const share =
+                  analytics.sessionCount === 0
+                    ? 0
+                    : Math.round(
+                        (row.count /
+                          analytics.sessionCount) *
+                          100,
+                      );
+
+                return (
+                  <div key={row.label}>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600">
+                        {row.label}
+                      </span>
+
+                      <span className="ml-auto text-xs text-gray-500">
+                        {row.count}{" "}
+                        {row.count === 1
+                          ? "session"
+                          : "sessions"}{" "}
+                        · {share}%
+                      </span>
+                    </div>
+
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-100">
+                      <div
+                        className="h-full rounded-full bg-gray-900 transition-all"
+                        style={{
+                          width: `${share}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {analytics.interviewSessions > 0 && (
+              <div className="mt-3 rounded-lg bg-gray-50 px-4 py-3">
+                <p className="text-xs text-gray-500">
+                  {analytics.interviewSessions}{" "}
+                  {analytics.interviewSessions ===
+                  1
+                    ? "interview"
+                    : "interviews"}{" "}
+                  · {analytics.timedInterviews}{" "}
+                  timed · avg{" "}
+                  {Math.round(
+                    (analytics.interviewQuestions /
+                      analytics.interviewSessions) *
+                      10,
+                  ) / 10}{" "}
+                  questions ·{" "}
+                  {analytics.interviewQuestions ===
+                  0
+                    ? 0
+                    : Math.round(
+                        (analytics.interviewCompleted /
+                          analytics.interviewQuestions) *
+                          100,
+                      )}
+                  % completion
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="mt-6">

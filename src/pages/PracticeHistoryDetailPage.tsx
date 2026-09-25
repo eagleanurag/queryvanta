@@ -194,7 +194,28 @@ function PracticeHistoryDetailPage() {
               {notCompleted} Not Completed · Order:{" "}
               {entry.selectionMode === "random"
                 ? "Random"
-                : "Sequential"}
+                : "Sequential"}{" "}
+              · Mode:{" "}
+              {(entry.origin ?? "standard") ===
+              "standard"
+                ? "Standard"
+                : (entry.origin ?? "standard") ===
+                    "learning"
+                  ? "Learning"
+                  : (entry.origin ??
+                      "standard") === "interview"
+                    ? typeof entry.timeLimitSec ===
+                        "number" &&
+                      Number.isFinite(
+                        entry.timeLimitSec,
+                      ) &&
+                      entry.timeLimitSec > 0
+                      ? "Interview · Timed"
+                      : "Interview"
+                    : "Weak Areas"}
+              {entry.originLabel
+                ? ` · ${entry.originLabel}`
+                : ""}
             </p>
 
             <p className="mt-4 text-3xl font-semibold text-gray-900">

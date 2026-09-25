@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Clock,
   Flag,
   RotateCcw,
   Target,
@@ -34,6 +35,9 @@ import {
   updateSessionIndex,
 } from "../lib/practiceSession";
 import type { PracticeSession } from "../lib/practiceSession";
+import {
+  formatCountdown,
+} from "../lib/learning";
 
 import QuestionPage from "./QuestionPage";
 import PracticeHistoryList from "../components/PracticeHistoryList";
@@ -175,6 +179,61 @@ function PracticePage() {
     }
   }, [session, currentQuestionId, searchParams, setSearchParams]);
 
+  const isInterview =
+    session?.origin === "interview";
+  const isTimedInterview =
+    isInterview &&
+    session?.status === "active" &&
+    typeof session?.endsAt === "number" &&
+    Number.isFinite(session.endsAt);
+
+  const [nowMs, setNowMs] = useState(() =>
+    Date.now(),
+  );
+
+  useEffect(() => {
+    if (!isTimedInterview) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setNowMs(Date.now());
+
+      // Auto-finish from the timer callback (event
+      // context) so expiry persists across refresh and
+      // background throttling via the absolute endsAt.
+      const latest = getPracticeSession();
+
+      if (
+        latest &&
+        latest.sessionId ===
+          session?.sessionId &&
+        latest.status === "active" &&
+        typeof latest.endsAt === "number" &&
+        Number.isFinite(latest.endsAt) &&
+        latest.endsAt <= Date.now()
+      ) {
+        setSession(
+          finishPracticeSession(latest),
+        );
+      }
+    }, 1000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [isTimedInterview, session?.sessionId]);
+
+  const remainingSec =
+    isTimedInterview && session?.endsAt !== undefined
+      ? Math.max(
+          0,
+          Math.round(
+            (session.endsAt - nowMs) / 1000,
+          ),
+        )
+      : null;
+
   if (!session) {
     return (
       <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
@@ -298,6 +357,162 @@ function PracticePage() {
                   </p>
                 </>
               )}
+
+              {session.origin === "interview" &&
+                validQuestionIds.length > 0 &&
+                (() => {
+                  const typeCounts = new Map<
+                    string,
+                    number
+                  >();
+                  const categoryCounts = new Map<
+                    string,
+                    number
+                  >();
+                  const difficultyCounts = new Map<
+                    string,
+                    number
+                  >();
+
+                  for (const id of validQuestionIds) {
+                    const item =
+                      questionById.get(id);
+
+                    if (!item) {
+                      continue;
+                    }
+
+                    typeCounts.set(
+                      item.questionType,
+                      (typeCounts.get(
+                        item.questionType,
+                      ) ?? 0) + 1,
+                    );
+                    categoryCounts.set(
+                      item.category,
+                      (categoryCounts.get(
+                        item.category,
+                      ) ?? 0) + 1,
+                    );
+                    difficultyCounts.set(
+                      item.difficulty,
+                      (difficultyCounts.get(
+                        item.difficulty,
+                      ) ?? 0) + 1,
+                    );
+                  }
+
+                  const startedAt =
+                    session.startedAt;
+                  // Fallback only for corrupt sessions
+                  // missing finishedAt; finished sessions
+                  // always record one.
+                  const endedAt =
+                    typeof session.finishedAt ===
+                      "number" &&
+                    Number.isFinite(
+                      session.finishedAt,
+                    )
+                      ? session.finishedAt
+                      : // eslint-disable-next-line react-hooks/purity
+                        Date.now();
+                  const timeUsedSec = Math.max(
+                    0,
+                    Math.round(
+                      (endedAt - startedAt) /
+                        1000,
+                    ),
+                  );
+                  const timeRemainingSec =
+                    typeof session.endsAt ===
+                      "number" &&
+                    Number.isFinite(
+                      session.endsAt,
+                    )
+                      ? Math.max(
+                          0,
+                          Math.round(
+                            (session.endsAt -
+                              endedAt) /
+                              1000,
+                          ),
+                        )
+                      : null;
+
+                  const summarize = (
+                    counts: Map<string, number>,
+                  ) =>
+                    [...counts.entries()]
+                      .sort(
+                        (a, b) =>
+                          b[1] - a[1] ||
+                          a[0].localeCompare(b[0]),
+                      )
+                      .map(
+                        ([name, count]) =>
+                          `${name} ${count}`,
+                      )
+                      .join(" · ");
+
+                  return (
+                    <div className="mt-6 grid grid-cols-1 gap-3 text-left sm:grid-cols-2">
+                      <div className="rounded-lg bg-gray-50 px-4 py-3">
+                        <p className="text-xs text-gray-500">
+                          Time used
+                        </p>
+
+                        <p className="mt-1 text-xl font-semibold text-gray-900">
+                          {formatCountdown(
+                            timeUsedSec,
+                          )}
+                        </p>
+
+                        <p className="mt-1 text-xs text-gray-400">
+                          {timeRemainingSec === null
+                            ? "Untimed interview"
+                            : `${formatCountdown(timeRemainingSec)} remaining at finish`}
+                        </p>
+                      </div>
+
+                      <div className="rounded-lg bg-gray-50 px-4 py-3">
+                        <p className="text-xs text-gray-500">
+                          Question mix
+                        </p>
+
+                        <p className="mt-1 text-xl font-semibold text-gray-900">
+                          {typeCounts.size === 0
+                            ? "—"
+                            : summarize(
+                                typeCounts,
+                              )}
+                        </p>
+
+                        <p className="mt-1 text-xs text-gray-400">
+                          {difficultyCounts.size >
+                          0
+                            ? summarize(
+                                difficultyCounts,
+                              )
+                            : "No difficulty data"}
+                        </p>
+                      </div>
+
+                      {categoryCounts.size > 0 && (
+                        <div className="rounded-lg bg-gray-50 px-4 py-3 sm:col-span-2">
+                          <p className="text-xs text-gray-500">
+                            Categories
+                          </p>
+
+                          <p className="mt-1 text-sm font-medium text-gray-900">
+                            {summarize(
+                              categoryCounts,
+                            )}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
               <div className="mt-6 flex flex-col items-center justify-center gap-2 sm:flex-row">
                 {validQuestionIds.length > 0 && (
@@ -433,8 +648,32 @@ function PracticePage() {
           <div className="mx-4 h-5 w-px bg-gray-200" />
 
           <span className="text-sm font-medium text-gray-900">
-            Practice Session
+            {isInterview
+              ? (session?.originLabel ??
+                "Interview")
+              : "Practice Session"}
           </span>
+
+          {remainingSec !== null && (
+            <>
+              <div className="mx-4 h-5 w-px bg-gray-200" />
+
+              <span
+                role="timer"
+                aria-label={`Time remaining: ${formatCountdown(remainingSec)}`}
+                aria-live="off"
+                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium ${
+                  remainingSec < 300
+                    ? "bg-red-50 text-red-600"
+                    : "bg-gray-100 text-gray-700"
+                }`}
+              >
+                <Clock size={13} />
+                {formatCountdown(remainingSec)}{" "}
+                left
+              </span>
+            </>
+          )}
 
           <div className="mx-4 h-5 w-px bg-gray-200" />
 
@@ -524,11 +763,17 @@ function PracticePage() {
               <button
                 type="button"
                 onClick={handleFinish}
-                aria-label="Finish practice session"
+                aria-label={
+                  isInterview
+                    ? "Finish interview"
+                    : "Finish practice session"
+                }
                 className="flex items-center justify-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
               >
                 <Flag size={16} />
-                Finish Session
+                {isInterview
+                  ? "Finish Interview"
+                  : "Finish Session"}
               </button>
             ) : (
               <button
