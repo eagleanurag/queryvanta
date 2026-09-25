@@ -53,6 +53,11 @@ export type Question = {
   companies: string[];
   solved: boolean;
 
+  // Optional admin-managed flag. Absent means enabled,
+  // so all built-in questions and legacy admin records
+  // stay active without migration.
+  enabled?: boolean;
+
   database?: QuestionDatabase;
 
   starterCode?: string;

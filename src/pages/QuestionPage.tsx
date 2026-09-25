@@ -40,7 +40,9 @@ import type { TableDefinition } from "../data/questions";
 import type { AdminFormDraft } from "./AdminPage";
 import {
   ADMIN_QUESTIONS_EVENT,
+  combineQuestionCatalogs,
   getAdminQuestions,
+  isQuestionEnabled,
 } from "../lib/adminQuestions";
 import {
   BOOKMARKS_EVENT,
@@ -406,9 +408,22 @@ function QuestionPage({
     };
   }, []);
 
+  // Full catalog for direct/history/preview
+  // lookups so disabled questions stay viewable.
   const allQuestions = useMemo(
-    () => [...questions, ...getAdminQuestions()],
+    () =>
+      combineQuestionCatalogs(
+        questions,
+        getAdminQuestions(),
+      ),
     [questionId, navListVersion],
+  );
+
+  // Previous/next navigation stays within the
+  // active public catalog.
+  const activeQuestions = useMemo(
+    () => allQuestions.filter(isQuestionEnabled),
+    [allQuestions],
   );
 
   const question =
@@ -430,11 +445,11 @@ function QuestionPage({
 
   const navQuestions = useMemo(() => {
     if (isPreview || !hasDiscoveryContext) {
-      return allQuestions;
+      return activeQuestions;
     }
 
     return filterQuestions(
-      allQuestions,
+      activeQuestions,
       discoveryFilters,
       navSolvedIds,
       navBookmarkedIds,
@@ -442,7 +457,7 @@ function QuestionPage({
   }, [
     isPreview,
     hasDiscoveryContext,
-    allQuestions,
+    activeQuestions,
     discoveryFilters,
     navSolvedIds,
     navBookmarkedIds,

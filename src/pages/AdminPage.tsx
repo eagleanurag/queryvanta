@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 
 import {
@@ -8,6 +8,7 @@ import {
   Download,
   Eye,
   Pencil,
+  Play,
   Plus,
   Search,
   Table2,
@@ -29,17 +30,28 @@ import type {
   Question,
 } from "../data/questions";
 
+import { questions as builtInQuestions } from "../data/questions";
+
 import {
   clearAdminQuestions,
+  combineQuestionCatalogs,
   deleteAdminQuestion,
   deleteAdminQuestions,
   duplicateAdminQuestion,
   getAdminQuestions,
   importAdminQuestions,
+  isQuestionEnabled,
   saveAdminQuestion,
+  setAdminQuestionEnabled,
   updateAdminQuestion,
   validateImportedQuestions,
 } from "../lib/adminQuestions";
+import { getBookmarkedQuestionIds } from "../lib/bookmarks";
+import { createQuestionDatabase } from "../lib/pglite";
+import { getPracticeHistory } from "../lib/practiceSession";
+import { isQuestionSolved } from "../lib/progress";
+import { PysparkClient } from "../lib/pysparkClient";
+import { validateResult } from "../lib/validation";
 
 const LOCAL_SORT_OPTIONS = [
   { value: "newest", label: "Newest first" },
@@ -82,12 +94,18 @@ export type AdminFormDraft = {
   title: string;
   description: string;
   difficulty: Difficulty;
+  questionType: Question["questionType"];
   category: string;
   companiesText: string;
   languagesText: string;
   tagsText: string;
   starterSql: string;
   expectedResultText: string;
+  hint: string;
+  solutionCode: string;
+  explanation: string;
+  enabled: boolean;
+  questionId: string;
   tables: TableDraft[];
   editingQuestionId: string | null;
 };
@@ -157,6 +175,13 @@ function AdminPage() {
     useState<Difficulty>(
       incomingDraft?.difficulty ?? "Easy",
     );
+  const [questionType, setQuestionType] = useState<
+    "SQL" | "PySpark"
+  >(
+    incomingDraft?.questionType === "PySpark"
+      ? "PySpark"
+      : "SQL",
+  );
   const [category, setCategory] = useState(
     incomingDraft?.category ?? "",
   );
@@ -176,6 +201,23 @@ function AdminPage() {
     useState(
       incomingDraft?.expectedResultText ?? "[]",
     );
+  const [hint, setHint] = useState(
+    incomingDraft?.hint ?? "",
+  );
+  const [solutionCode, setSolutionCode] = useState(
+    incomingDraft?.solutionCode ?? "",
+  );
+  const [explanation, setExplanation] = useState(
+    incomingDraft?.explanation ?? "",
+  );
+  const [enabled, setEnabled] = useState(
+    incomingDraft?.enabled ?? true,
+  );
+  const [questionId, setQuestionId] = useState(
+    () =>
+      incomingDraft?.questionId ??
+      generateQuestionId(),
+  );
   const [tables, setTables] = useState<TableDraft[]>(
     incomingDraft?.tables ?? [createEmptyTable()],
   );
@@ -202,6 +244,15 @@ function AdminPage() {
     useState("All");
   const [localCategory, setLocalCategory] =
     useState("All");
+  const [localCompany, setLocalCompany] =
+    useState("All");
+  const [localEnabled, setLocalEnabled] = useState<
+    "All" | "Enabled" | "Disabled"
+  >("All");
+  const [localValidation, setLocalValidation] =
+    useState<
+      "All" | "Has validation" | "No validation"
+    >("All");
   const [localSort, setLocalSort] =
     useState<LocalSortOrder>("newest");
   const [selectedIds, setSelectedIds] = useState<
@@ -210,18 +261,101 @@ function AdminPage() {
   const [confirmBulkDelete, setConfirmBulkDelete] =
     useState(false);
 
+  type ValidationCheck =
+    | { status: "idle" }
+    | { status: "running"; message: string }
+    | {
+        status: "ok" | "error";
+        message: string;
+      };
+
+  const [validationCheck, setValidationCheck] =
+    useState<ValidationCheck>({ status: "idle" });
+
+  const [validationRuns, setValidationRuns] =
+    useState<
+      Record<
+        string,
+        { ok: boolean; message: string }
+      >
+    >({});
+
+  const [deleteConfirmId, setDeleteConfirmId] =
+    useState<string | null>(null);
+
+  const pysparkClientRef =
+    useRef<PysparkClient | null>(null);
+
+  useEffect(() => {
+    return () => {
+      pysparkClientRef.current?.dispose();
+      pysparkClientRef.current = null;
+    };
+  }, []);
+
+  // Ephemeral validation badges reset whenever the
+  // catalog changes so stale results cannot linger.
+  const applyAdminQuestions = (
+    next: Question[],
+  ) => {
+    setAdminQuestions(next);
+    setValidationRuns({});
+    setDeleteConfirmId(null);
+  };
+
+  // Effective catalog: built-in questions first
+  // in catalog order, then admin questions. Built-in
+  // entries win on ID collision.
+  const effectiveCatalog = useMemo(
+    () =>
+      combineQuestionCatalogs(
+        builtInQuestions,
+        adminQuestions,
+      ),
+    [adminQuestions],
+  );
+
+  const builtInIds = useMemo(
+    () =>
+      new Set(
+        builtInQuestions.map(
+          (question) => question.id,
+        ),
+      ),
+    [],
+  );
+
+  const catalogStats = useMemo(() => {
+    const enabled = effectiveCatalog.filter(
+      isQuestionEnabled,
+    );
+
+    return {
+      total: effectiveCatalog.length,
+      enabled: enabled.length,
+      sql: effectiveCatalog.filter(
+        (question) =>
+          question.questionType === "SQL",
+      ).length,
+      pyspark: effectiveCatalog.filter(
+        (question) =>
+          question.questionType === "PySpark",
+      ).length,
+    };
+  }, [effectiveCatalog]);
+
   const localQuestionTypes = useMemo(
     () => [
       "All",
       ...Array.from(
         new Set(
-          adminQuestions.map(
+          effectiveCatalog.map(
             (question) => question.questionType,
           ),
         ),
       ),
     ],
-    [adminQuestions],
+    [effectiveCatalog],
   );
 
   const localCategories = useMemo(
@@ -229,13 +363,30 @@ function AdminPage() {
       "All",
       ...Array.from(
         new Set(
-          adminQuestions.map(
-            (question) => question.category,
+          effectiveCatalog
+            .map((question) => question.category)
+            .filter(
+              (category) =>
+                category.trim() !== "",
+            ),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    ],
+    [effectiveCatalog],
+  );
+
+  const localCompanies = useMemo(
+    () => [
+      "All",
+      ...Array.from(
+        new Set(
+          effectiveCatalog.flatMap(
+            (question) => question.companies,
           ),
         ),
-      ),
+      ).sort((a, b) => a.localeCompare(b)),
     ],
-    [adminQuestions],
+    [effectiveCatalog],
   );
 
   const visibleLocalQuestions = useMemo(() => {
@@ -243,7 +394,7 @@ function AdminPage() {
       .trim()
       .toLowerCase();
 
-    const filtered = adminQuestions.filter(
+    const filtered = effectiveCatalog.filter(
       (question) => {
         const matchesSearch =
           normalizedSearch === "" ||
@@ -252,7 +403,23 @@ function AdminPage() {
             .includes(normalizedSearch) ||
           question.description
             .toLowerCase()
-            .includes(normalizedSearch);
+            .includes(normalizedSearch) ||
+          question.id
+            .toLowerCase()
+            .includes(normalizedSearch) ||
+          question.category
+            .toLowerCase()
+            .includes(normalizedSearch) ||
+          question.companies.some((company) =>
+            company
+              .toLowerCase()
+              .includes(normalizedSearch),
+          ) ||
+          question.tags.some((tag) =>
+            tag
+              .toLowerCase()
+              .includes(normalizedSearch),
+          );
 
         const matchesDifficulty =
           localDifficulty === "All" ||
@@ -267,11 +434,32 @@ function AdminPage() {
           localCategory === "All" ||
           question.category === localCategory;
 
+        const matchesCompany =
+          localCompany === "All" ||
+          question.companies.includes(
+            localCompany,
+          );
+
+        const matchesEnabled =
+          localEnabled === "All" ||
+          (localEnabled === "Enabled"
+            ? isQuestionEnabled(question)
+            : !isQuestionEnabled(question));
+
+        const matchesValidation =
+          localValidation === "All" ||
+          (localValidation === "Has validation"
+            ? question.validation !== undefined
+            : question.validation === undefined);
+
         return (
           matchesSearch &&
           matchesDifficulty &&
           matchesType &&
-          matchesCategory
+          matchesCategory &&
+          matchesCompany &&
+          matchesEnabled &&
+          matchesValidation
         );
       },
     );
@@ -292,11 +480,14 @@ function AdminPage() {
 
     return sorted;
   }, [
-    adminQuestions,
+    effectiveCatalog,
     localSearch,
     localDifficulty,
     localQuestionType,
     localCategory,
+    localCompany,
+    localEnabled,
+    localValidation,
     localSort,
   ]);
 
@@ -304,13 +495,19 @@ function AdminPage() {
     localSearch.trim() !== "" ||
     localDifficulty !== "All" ||
     localQuestionType !== "All" ||
-    localCategory !== "All";
+    localCategory !== "All" ||
+    localCompany !== "All" ||
+    localEnabled !== "All" ||
+    localValidation !== "All";
 
   const clearLocalFilters = () => {
     setLocalSearch("");
     setLocalDifficulty("All");
     setLocalQuestionType("All");
     setLocalCategory("All");
+    setLocalCompany("All");
+    setLocalEnabled("All");
+    setLocalValidation("All");
   };
 
   const [editingQuestionId, setEditingQuestionId] =
@@ -418,14 +615,34 @@ function AdminPage() {
     setTitle("");
     setDescription("");
     setDifficulty("Easy");
+    setQuestionType("SQL");
     setCategory("");
     setCompaniesText("");
     setLanguagesText("");
     setTagsText("");
     setStarterSql("");
     setExpectedResultText("[]");
+    setHint("");
+    setSolutionCode("");
+    setExplanation("");
+    setEnabled(true);
+    setQuestionId(generateQuestionId());
     setTables([createEmptyTable()]);
+    setValidationCheck({ status: "idle" });
   };
+
+  // Tables left completely empty are treated as
+  // absent, so PySpark questions (where tables are
+  // optional) don't trip on the default blank row.
+  // SQL still requires at least one named table.
+  const getEffectiveTables = () =>
+    tables.filter(
+      (table) =>
+        table.name.trim() !== "" ||
+        table.columns.some(
+          (column) => column.name.trim() !== "",
+        ),
+    );
 
   const validateForm = (): {
     validationErrors: string[];
@@ -447,10 +664,19 @@ function AdminPage() {
     }
 
     if (starterSql.trim() === "") {
-      validationErrors.push("Starter SQL is required.");
+      validationErrors.push(
+        questionType === "PySpark"
+          ? "Starter PySpark code is required."
+          : "Starter SQL is required.",
+      );
     }
 
-    if (tables.length === 0) {
+    const effectiveTables = getEffectiveTables();
+
+    if (
+      effectiveTables.length === 0 &&
+      questionType === "SQL"
+    ) {
       validationErrors.push(
         "At least one table is required.",
       );
@@ -458,7 +684,7 @@ function AdminPage() {
 
     const seenTableNames = new Set<string>();
 
-    tables.forEach((table, tableIndex) => {
+    effectiveTables.forEach((table, tableIndex) => {
       const tableLabel = `Table ${tableIndex + 1}`;
       const tableName = table.name.trim();
 
@@ -544,7 +770,7 @@ function AdminPage() {
 
     const tableRows: Record<string, unknown>[][] = [];
 
-    tables.forEach((table, tableIndex) => {
+    effectiveTables.forEach((table, tableIndex) => {
       const tableLabel =
         table.name.trim() === ""
           ? `Table ${tableIndex + 1}`
@@ -592,32 +818,57 @@ function AdminPage() {
   ): Question => {
     const languages = parseCsv(languagesText);
 
+    const defaultLanguages =
+      questionType === "PySpark"
+        ? ["PySpark"]
+        : ["PostgreSQL"];
+
+    const effectiveTables = getEffectiveTables();
+
     return {
       id,
       title: title.trim(),
       description: description.trim(),
       difficulty,
-      questionType: "SQL",
+      questionType,
       category: category.trim(),
       languages:
         languages.length > 0
           ? languages
-          : ["PostgreSQL"],
+          : defaultLanguages,
       tags: parseCsv(tagsText),
       companies: parseCsv(companiesText),
       solved: false,
-      database: {
-        engine: "PostgreSQL",
-        tables: tables.map((table, tableIndex) => ({
-          name: table.name.trim(),
-          columns: table.columns.map((column) => ({
-            name: column.name.trim(),
-            type: column.type,
-          })),
-          rows: tableRows[tableIndex] ?? [],
-        })),
-      },
+      enabled,
+      ...(effectiveTables.length === 0
+        ? {}
+        : {
+            database: {
+              engine: "PostgreSQL" as const,
+              tables: effectiveTables.map(
+                (table, tableIndex) => ({
+                  name: table.name.trim(),
+                  columns: table.columns.map(
+                    (column) => ({
+                      name: column.name.trim(),
+                      type: column.type,
+                    }),
+                  ),
+                  rows: tableRows[tableIndex] ?? [],
+                }),
+              ),
+            },
+          }),
       starterCode: starterSql,
+      ...(hint.trim() !== ""
+        ? { hint: hint.trim() }
+        : {}),
+      ...(solutionCode !== ""
+        ? { solutionCode }
+        : {}),
+      ...(explanation.trim() !== ""
+        ? { explanation: explanation.trim() }
+        : {}),
       validation: {
         type: "result",
         orderMatters: false,
@@ -630,12 +881,18 @@ function AdminPage() {
     title,
     description,
     difficulty,
+    questionType,
     category,
     companiesText,
     languagesText,
     tagsText,
     starterSql,
     expectedResultText,
+    hint,
+    solutionCode,
+    explanation,
+    enabled,
+    questionId,
     tables,
     editingQuestionId,
   });
@@ -654,8 +911,44 @@ function AdminPage() {
       return;
     }
 
+    const trimmedId = questionId.trim();
+
+    if (trimmedId === "") {
+      setErrors(["Question ID is required."]);
+      setSuccessMessage("");
+      setCreatedQuestionId("");
+      return;
+    }
+
+    if (!isEditing) {
+      const builtInIds = new Set(
+        builtInQuestions.map(
+          (question) => question.id,
+        ),
+      );
+      const adminIds = new Set(
+        getAdminQuestions().map(
+          (question) => question.id,
+        ),
+      );
+
+      if (
+        builtInIds.has(trimmedId) ||
+        adminIds.has(trimmedId)
+      ) {
+        setErrors([
+          `Question ID "${trimmedId}" already exists. Choose a unique ID.`,
+        ]);
+        setSuccessMessage("");
+        setCreatedQuestionId("");
+        return;
+      }
+    }
+
     const question = buildQuestion(
-      editingQuestionId ?? generateQuestionId(),
+      isEditing && editingQuestionId !== null
+        ? editingQuestionId
+        : trimmedId,
       expectedResult,
       tableRows,
     );
@@ -706,6 +999,331 @@ function AdminPage() {
     });
   };
 
+  const handlePreviewQuestion = (
+    question: Question,
+  ) => {
+    navigate("/admin/preview", {
+      state: {
+        previewQuestion: question,
+        formDraft: captureDraft(),
+      },
+    });
+  };
+
+  const parseValidationBlock = (): {
+    expectedResult: Record<string, unknown>[];
+    error: string | null;
+  } => {
+    try {
+      const parsed: unknown = JSON.parse(
+        expectedResultText.trim() === ""
+          ? "[]"
+          : expectedResultText,
+      );
+
+      if (
+        !Array.isArray(parsed) ||
+        !parsed.every(isRecord)
+      ) {
+        return {
+          expectedResult: [],
+          error:
+            "Expected Result must be a JSON array of objects.",
+        };
+      }
+
+      return {
+        expectedResult:
+          parsed as Record<string, unknown>[],
+        error: null,
+      };
+    } catch {
+      return {
+        expectedResult: [],
+        error: "Expected Result must be valid JSON.",
+      };
+    }
+  };
+
+  const recordValidationRun = (
+    questionId: string,
+    ok: boolean,
+    message: string,
+  ) => {
+    setValidationRuns((previous) => ({
+      ...previous,
+      [questionId]: { ok, message },
+    }));
+  };
+
+  const resolveRunTargetId = (): string => {
+    if (
+      isEditing &&
+      editingQuestionId !== null
+    ) {
+      return editingQuestionId;
+    }
+
+    const trimmedId = questionId.trim();
+
+    return trimmedId !== "" ? trimmedId : "";
+  };
+
+  const handleValidateSql = async () => {
+    const codeToRun =
+      solutionCode !== "" ? solutionCode : starterSql;
+    const codeLabel =
+      solutionCode !== "" ? "solution" : "starter";
+
+    if (codeToRun.trim() === "") {
+      setValidationCheck({
+        status: "error",
+        message:
+          "Add starter SQL before validating.",
+      });
+      return;
+    }
+
+    const { error: blockError, expectedResult } =
+      parseValidationBlock();
+
+    if (blockError !== null) {
+      setValidationCheck({
+        status: "error",
+        message: blockError,
+      });
+      return;
+    }
+
+    if (tables.length === 0) {
+      setValidationCheck({
+        status: "error",
+        message:
+          "Add at least one table before validating.",
+      });
+      return;
+    }
+
+    setValidationCheck({
+      status: "running",
+      message: `Running ${codeLabel} code against the configured tables...`,
+    });
+
+    try {
+      const effectiveTables = getEffectiveTables();
+      const tableRows: Record<string, unknown>[][] =
+        [];
+
+      for (const table of effectiveTables) {
+        try {
+          const parsedRows: unknown = JSON.parse(
+            table.sampleRowsText.trim() === ""
+              ? "[]"
+              : table.sampleRowsText,
+          );
+
+          if (
+            !Array.isArray(parsedRows) ||
+            !parsedRows.every(isRecord)
+          ) {
+            throw new Error("invalid rows");
+          }
+
+          tableRows.push(parsedRows);
+        } catch {
+          tableRows.push([]);
+        }
+      }
+
+      const db = await createQuestionDatabase({
+        engine: "PostgreSQL",
+        tables: effectiveTables.map(
+          (table, tableIndex) => ({
+            name: table.name.trim(),
+            columns: table.columns.map((column) => ({
+              name: column.name.trim(),
+              type: column.type,
+            })),
+            rows: tableRows[tableIndex] ?? [],
+          }),
+        ),
+      });
+
+      try {
+        const result =
+          await db.query<Record<string, unknown>>(
+            codeToRun,
+          );
+
+        const validation = validateResult(
+          result.rows,
+          expectedResult,
+          false,
+        );
+
+        const message = validation.correct
+          ? `Validated ${codeLabel} code: ${validation.message} (${result.rows.length} ${result.rows.length === 1 ? "row" : "rows"}).`
+          : `Validation failed for ${codeLabel} code: ${validation.message}`;
+
+        setValidationCheck({
+          status: validation.correct
+            ? "ok"
+            : "error",
+          message,
+        });
+
+        const targetId = resolveRunTargetId();
+
+        if (targetId !== "") {
+          recordValidationRun(
+            targetId,
+            validation.correct,
+            message,
+          );
+        }
+      } finally {
+        await db.close();
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : String(err);
+
+      setValidationCheck({
+        status: "error",
+        message: `Execution failed: ${message}`,
+      });
+    }
+  };
+
+  const handleValidatePySpark = async () => {
+    const codeToRun =
+      solutionCode !== "" ? solutionCode : starterSql;
+    const codeLabel =
+      solutionCode !== "" ? "solution" : "starter";
+
+    if (codeToRun.trim() === "") {
+      setValidationCheck({
+        status: "error",
+        message:
+          "Add starter PySpark code before validating.",
+      });
+      return;
+    }
+
+    const { error: blockError, expectedResult } =
+      parseValidationBlock();
+
+    if (blockError !== null) {
+      setValidationCheck({
+        status: "error",
+        message: blockError,
+      });
+      return;
+    }
+
+    setValidationCheck({
+      status: "running",
+      message: "Starting the Spark worker...",
+    });
+
+    try {
+      let client = pysparkClientRef.current;
+
+      if (!client) {
+        client = new PysparkClient(
+          (_stage, message) => {
+            setValidationCheck({
+              status: "running",
+              message,
+            });
+          },
+        );
+        pysparkClientRef.current = client;
+
+        await client.boot();
+      }
+
+      if (pysparkClientRef.current !== client) {
+        return;
+      }
+
+      setValidationCheck({
+        status: "running",
+        message: `Executing ${codeLabel} code on real Spark 4.2.0 ...`,
+      });
+
+      const outcome =
+        await client.runValidation(codeToRun);
+
+      if (pysparkClientRef.current !== client) {
+        return;
+      }
+
+      if (!outcome.ok) {
+        setValidationCheck({
+          status: "error",
+          message: `Execution failed: ${outcome.error}`,
+        });
+        return;
+      }
+
+      if (!outcome.hasResult) {
+        const message =
+          "Your code ran, but no `result` DataFrame was produced. Assign the final answer to `result`.";
+
+        setValidationCheck({
+          status: "error",
+          message,
+        });
+
+        const targetId = resolveRunTargetId();
+
+        if (targetId !== "") {
+          recordValidationRun(
+            targetId,
+            false,
+            message,
+          );
+        }
+
+        return;
+      }
+
+      const validation = validateResult(
+        outcome.records,
+        expectedResult,
+        false,
+      );
+
+      const message = validation.correct
+        ? `Validated ${codeLabel} code: ${validation.message} (${outcome.records.length} ${outcome.records.length === 1 ? "row" : "rows"}).`
+        : `Validation failed for ${codeLabel} code: ${validation.message}`;
+
+      setValidationCheck({
+        status: validation.correct ? "ok" : "error",
+        message,
+      });
+
+      const targetId = resolveRunTargetId();
+
+      if (targetId !== "") {
+        recordValidationRun(
+          targetId,
+          validation.correct,
+          message,
+        );
+      }
+    } catch (e) {
+      setValidationCheck({
+        status: "error",
+        message:
+          e instanceof Error ? e.message : String(e),
+      });
+    }
+  };
+
   const handleEdit = (question: Question) => {
     setTitle(question.title);
     setDescription(question.description);
@@ -715,6 +1333,11 @@ function AdminPage() {
       )
         ? (question.difficulty as Difficulty)
         : "Easy",
+    );
+    setQuestionType(
+      question.questionType === "PySpark"
+        ? "PySpark"
+        : "SQL",
     );
     setCategory(question.category);
     setCompaniesText(question.companies.join(", "));
@@ -728,6 +1351,11 @@ function AdminPage() {
         2,
       ),
     );
+    setHint(question.hint ?? "");
+    setSolutionCode(question.solutionCode ?? "");
+    setExplanation(question.explanation ?? "");
+    setEnabled(question.enabled !== false);
+    setQuestionId(question.id);
     setTables(
       question.database && question.database.tables.length > 0
         ? question.database.tables.map((table) => ({
@@ -748,6 +1376,7 @@ function AdminPage() {
     setErrors([]);
     setSuccessMessage("");
     setCreatedQuestionId("");
+    setValidationCheck({ status: "idle" });
 
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -758,8 +1387,47 @@ function AdminPage() {
     resetForm();
   };
 
+  const getQuestionReferences = (
+    questionId: string,
+  ): string[] => {
+    const references: string[] = [];
+
+    if (
+      getBookmarkedQuestionIds().has(questionId)
+    ) {
+      references.push("bookmarked");
+    }
+
+    if (isQuestionSolved(questionId)) {
+      references.push("solved");
+    }
+
+    const sessionCount = getPracticeHistory().filter(
+      (entry) =>
+        entry.questionIds.includes(questionId),
+    ).length;
+
+    if (sessionCount > 0) {
+      references.push(
+        `in ${sessionCount} practice ${
+          sessionCount === 1 ? "session" : "sessions"
+        }`,
+      );
+    }
+
+    return references;
+  };
+
   const handleDelete = (questionId: string) => {
-    setAdminQuestions(deleteAdminQuestion(questionId));
+    if (deleteConfirmId !== questionId) {
+      setDeleteConfirmId(questionId);
+      return;
+    }
+
+    setDeleteConfirmId(null);
+    applyAdminQuestions(
+      deleteAdminQuestion(questionId),
+    );
     setConfirmClearAll(false);
 
     setSelectedIds((previous) => {
@@ -779,6 +1447,25 @@ function AdminPage() {
     }
   };
 
+  const handleToggleEnabled = (
+    questionId: string,
+  ) => {
+    const target = adminQuestions.find(
+      (item) => item.id === questionId,
+    );
+
+    if (!target) {
+      return;
+    }
+
+    applyAdminQuestions(
+      setAdminQuestionEnabled(
+        questionId,
+        !isQuestionEnabled(target),
+      ),
+    );
+  };
+
   const toggleSelectedId = (questionId: string) => {
     setSelectedIds((previous) => {
       const next = new Set(previous);
@@ -796,9 +1483,12 @@ function AdminPage() {
   const selectAllVisible = () => {
     setSelectedIds(
       new Set(
-        visibleLocalQuestions.map(
-          (question) => question.id,
-        ),
+        visibleLocalQuestions
+          .filter(
+            (question) =>
+              !builtInIds.has(question.id),
+          )
+          .map((question) => question.id),
       ),
     );
   };
@@ -821,7 +1511,7 @@ function AdminPage() {
     const deletedIds = new Set(selectedIds);
     const deletedCount = deletedIds.size;
 
-    setAdminQuestions(
+    applyAdminQuestions(
       deleteAdminQuestions([...deletedIds]),
     );
     setSelectedIds(new Set());
@@ -848,7 +1538,38 @@ function AdminPage() {
   };
 
   const handleDuplicate = (questionId: string) => {
-    const copy = duplicateAdminQuestion(questionId);
+    const existing = adminQuestions.find(
+      (item) => item.id === questionId,
+    );
+
+    // Built-in questions are immutable, so
+    // duplicating one creates a new editable
+    // admin copy instead of touching the catalog.
+    const copy =
+      existing !== undefined
+        ? duplicateAdminQuestion(questionId)
+        : (() => {
+            const source = builtInQuestions.find(
+              (item) => item.id === questionId,
+            );
+
+            if (!source) {
+              return null;
+            }
+
+            const duplicate: Question = JSON.parse(
+              JSON.stringify(source),
+            );
+
+            duplicate.id = generateQuestionId();
+            duplicate.title = `${source.title} (Copy)`;
+            duplicate.solved = false;
+            duplicate.enabled = true;
+
+            saveAdminQuestion(duplicate);
+
+            return duplicate;
+          })();
 
     if (!copy) {
       setErrors([
@@ -857,7 +1578,8 @@ function AdminPage() {
       return;
     }
 
-    setAdminQuestions(getAdminQuestions());
+    applyAdminQuestions(getAdminQuestions());
+    handleEdit(copy);
     setErrors([]);
     setSuccessMessage(
       `Question "${copy.title}" duplicated successfully.`,
@@ -871,7 +1593,7 @@ function AdminPage() {
       return;
     }
 
-    setAdminQuestions(clearAdminQuestions());
+    applyAdminQuestions(clearAdminQuestions());
     setConfirmClearAll(false);
     setSelectedIds(new Set());
     setConfirmBulkDelete(false);
@@ -953,7 +1675,7 @@ function AdminPage() {
       validation.questions,
     );
 
-    setAdminQuestions(summary.questions);
+    applyAdminQuestions(summary.questions);
     setErrors([]);
     setSuccessMessage(
       `Imported ${summary.imported} ${
@@ -992,13 +1714,55 @@ function AdminPage() {
       <main className="p-8">
         <div className="mx-auto max-w-[1000px]">
           <h1 className="text-2xl font-semibold text-gray-900">
-            Question Builder
+            Question Management
           </h1>
 
           <p className="mt-1 text-sm text-gray-500">
-            Create and save SQL practice questions
-            locally.
+            Create and manage SQL and PySpark
+            practice questions locally.
           </p>
+
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+              <p className="text-xs text-gray-500">
+                Total Questions
+              </p>
+
+              <p className="mt-1 text-xl font-semibold text-gray-900">
+                {catalogStats.total}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+              <p className="text-xs text-gray-500">
+                Enabled Questions
+              </p>
+
+              <p className="mt-1 text-xl font-semibold text-gray-900">
+                {catalogStats.enabled}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+              <p className="text-xs text-gray-500">
+                SQL Questions
+              </p>
+
+              <p className="mt-1 text-xl font-semibold text-gray-900">
+                {catalogStats.sql}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+              <p className="text-xs text-gray-500">
+                PySpark Questions
+              </p>
+
+              <p className="mt-1 text-xl font-semibold text-gray-900">
+                {catalogStats.pyspark}
+              </p>
+            </div>
+          </div>
 
           {errors.length > 0 && (
             <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-5">
@@ -1153,12 +1917,66 @@ function AdminPage() {
 
                 <select
                   id="admin-question-type"
-                  value="SQL"
-                  disabled
-                  className={`${inputClassName} cursor-not-allowed bg-gray-50`}
+                  value={questionType}
+                  onChange={(event) =>
+                    setQuestionType(
+                      event.target.value as
+                        | "SQL"
+                        | "PySpark",
+                    )
+                  }
+                  className={`${inputClassName} cursor-pointer`}
                 >
                   <option value="SQL">SQL</option>
+                  <option value="PySpark">
+                    PySpark
+                  </option>
                 </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="admin-question-id"
+                  className={labelClassName}
+                >
+                  Question ID
+                </label>
+
+                {isEditing ? (
+                  <>
+                    <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-sm text-gray-600">
+                      {questionId}
+                    </p>
+
+                    <p className="mt-2 text-xs text-gray-400">
+                      IDs can&apos;t be changed
+                      after creation so bookmarks,
+                      progress and history keep
+                      working.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <input
+                      id="admin-question-id"
+                      type="text"
+                      value={questionId}
+                      onChange={(event) =>
+                        setQuestionId(
+                          event.target.value,
+                        )
+                      }
+                      placeholder="my-new-question"
+                      spellCheck={false}
+                      className={`${inputClassName} font-mono`}
+                    />
+
+                    <p className="mt-2 text-xs text-gray-400">
+                      Unique across built-in and
+                      local questions.
+                    </p>
+                  </>
+                )}
               </div>
 
               <div>
@@ -1251,12 +2069,39 @@ function AdminPage() {
               comma-separated values, for example:
               Amazon, Google, Microsoft.
             </p>
+
+            <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-lg border border-gray-200 px-3 py-2.5">
+              <input
+                id="admin-enabled"
+                type="checkbox"
+                checked={enabled}
+                onChange={(event) =>
+                  setEnabled(event.target.checked)
+                }
+                className="h-4 w-4 shrink-0 cursor-pointer accent-gray-900"
+              />
+
+              <span>
+                <span className="block text-sm font-medium text-gray-700">
+                  Enabled in the public catalog
+                </span>
+
+                <span className="block text-xs text-gray-400">
+                  Disabled questions stay stored
+                  and editable but are hidden
+                  from discovery and new practice
+                  sessions.
+                </span>
+              </span>
+            </label>
           </section>
 
           {/* SQL fields */}
           <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             <h2 className="font-semibold text-gray-900">
-              SQL fields
+              {questionType === "PySpark"
+                ? "PySpark fields"
+                : "SQL fields"}
             </h2>
 
             <div className="mt-4">
@@ -1264,7 +2109,9 @@ function AdminPage() {
                 htmlFor="admin-starter-sql"
                 className={labelClassName}
               >
-                Starter SQL
+                {questionType === "PySpark"
+                  ? "Starter PySpark Code"
+                  : "Starter SQL"}
               </label>
 
               <textarea
@@ -1273,7 +2120,11 @@ function AdminPage() {
                 onChange={(event) =>
                   setStarterSql(event.target.value)
                 }
-                placeholder="SELECT * FROM customers;"
+                placeholder={
+                  questionType === "PySpark"
+                    ? "result = sales.groupBy(...)"
+                    : "SELECT * FROM customers;"
+                }
                 rows={6}
                 spellCheck={false}
                 className={`${inputClassName} resize-y font-mono`}
@@ -1307,6 +2158,143 @@ function AdminPage() {
                 rows. An empty array is valid.
               </p>
             </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={
+                  questionType === "PySpark"
+                    ? handleValidatePySpark
+                    : handleValidateSql
+                }
+                disabled={
+                  validationCheck.status ===
+                  "running"
+                }
+                className="flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Play size={14} />
+                {validationCheck.status ===
+                "running"
+                  ? "Validating..."
+                  : questionType === "PySpark"
+                    ? "Validate PySpark"
+                    : "Validate SQL"}
+              </button>
+
+              <p className="text-xs text-gray-400">
+                Runs the solution code when
+                provided, otherwise the starter
+                code, through the real execution
+                path. Nothing is marked solved.
+              </p>
+            </div>
+
+            {validationCheck.status !== "idle" && (
+              <div
+                className={`mt-4 rounded-lg border p-4 text-sm ${
+                  validationCheck.status === "ok"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : validationCheck.status ===
+                        "error"
+                      ? "border-red-200 bg-red-50 text-red-600"
+                      : "border-gray-200 bg-gray-50 text-gray-600"
+                }`}
+              >
+                {validationCheck.status ===
+                "running" ? (
+                  <p>{validationCheck.message}</p>
+                ) : validationCheck.status ===
+                  "ok" ? (
+                  <p className="flex items-center gap-2 font-medium">
+                    <CheckCircle2 size={15} />
+                    {validationCheck.message}
+                  </p>
+                ) : (
+                  <p className="flex items-center gap-2 font-medium">
+                    <XCircle size={15} />
+                    {validationCheck.message}
+                  </p>
+                )}
+              </div>
+            )}
+          </section>
+
+          {/* Learning content */}
+          <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+            <h2 className="font-semibold text-gray-900">
+              Learning content
+            </h2>
+
+            <p className="mt-1 text-xs text-gray-500">
+              All fields are optional. Hints,
+              solutions and explanations appear on
+              the question page without marking
+              anything solved.
+            </p>
+
+            <div className="mt-4">
+              <label
+                htmlFor="admin-hint"
+                className={labelClassName}
+              >
+                Hint
+              </label>
+
+              <textarea
+                id="admin-hint"
+                value={hint}
+                onChange={(event) =>
+                  setHint(event.target.value)
+                }
+                placeholder="A short nudge toward the right approach."
+                rows={3}
+                className={`${inputClassName} resize-y`}
+              />
+            </div>
+
+            <div className="mt-4">
+              <label
+                htmlFor="admin-solution"
+                className={labelClassName}
+              >
+                Solution Code
+              </label>
+
+              <textarea
+                id="admin-solution"
+                value={solutionCode}
+                onChange={(event) =>
+                  setSolutionCode(
+                    event.target.value,
+                  )
+                }
+                placeholder="A complete working solution."
+                rows={6}
+                spellCheck={false}
+                className={`${inputClassName} resize-y font-mono`}
+              />
+            </div>
+
+            <div className="mt-4">
+              <label
+                htmlFor="admin-explanation"
+                className={labelClassName}
+              >
+                Explanation
+              </label>
+
+              <textarea
+                id="admin-explanation"
+                value={explanation}
+                onChange={(event) =>
+                  setExplanation(event.target.value)
+                }
+                placeholder="Why the solution works."
+                rows={3}
+                className={`${inputClassName} resize-y`}
+              />
+            </div>
           </section>
 
           {/* Database schema */}
@@ -1315,6 +2303,14 @@ function AdminPage() {
               <h2 className="font-semibold text-gray-900">
                 Database schema
               </h2>
+
+              {questionType === "PySpark" && (
+                <p className="mt-1 text-xs text-gray-500">
+                  Optional for PySpark: documents
+                  the tables the code runs
+                  against.
+                </p>
+              )}
 
               <button
                 type="button"
@@ -1506,11 +2502,11 @@ function AdminPage() {
             </button>
           )}
 
-          {/* Admin question list */}
+          {/* Question catalog */}
           <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-semibold text-gray-900">
-                Local questions
+                Question catalog
               </h2>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -1536,6 +2532,7 @@ function AdminPage() {
                   <button
                     type="button"
                     onClick={handleClearAll}
+                    title="Delete all locally managed questions"
                     className={`rounded-lg border px-3 py-1.5 text-xs ${
                       confirmClearAll
                         ? "border-red-300 bg-red-50 font-medium text-red-600 hover:bg-red-100"
@@ -1550,7 +2547,16 @@ function AdminPage() {
               </div>
             </div>
 
-            {adminQuestions.length > 0 && (
+            <p className="mt-2 text-xs text-gray-500">
+              Built-in questions are immutable.
+              Locally managed questions support
+              editing, duplicates, enable/disable
+              and deletion. Validation badges
+              reflect this session&apos;s runs and
+              reset on reload or catalog changes.
+            </p>
+
+            {effectiveCatalog.length > 0 && (
               <div className="mt-4 space-y-3">
                 <div className="relative flex h-10 flex-1 items-center rounded-lg border border-gray-200 bg-gray-50">
                   <Search
@@ -1566,8 +2572,8 @@ function AdminPage() {
                         event.target.value,
                       )
                     }
-                    placeholder="Search local questions by title or description..."
-                    aria-label="Search local questions"
+                    placeholder="Search questions by title, description, ID, category, company or tag..."
+                    aria-label="Search catalog questions"
                     className="h-full min-w-0 flex-1 bg-transparent px-3 text-sm text-gray-700 outline-none placeholder:text-gray-400"
                   />
 
@@ -1653,6 +2659,76 @@ function AdminPage() {
                   </select>
 
                   <select
+                    value={localCompany}
+                    onChange={(event) =>
+                      setLocalCompany(
+                        event.target.value,
+                      )
+                    }
+                    aria-label="Filter by company"
+                    className="cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 outline-none hover:bg-gray-50"
+                  >
+                    {localCompanies.map((option) => (
+                      <option
+                        key={option}
+                        value={option}
+                      >
+                        {option === "All"
+                          ? "All Companies"
+                          : option}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={localEnabled}
+                    onChange={(event) =>
+                      setLocalEnabled(
+                        event.target.value as
+                          | "All"
+                          | "Enabled"
+                          | "Disabled",
+                      )
+                    }
+                    aria-label="Filter by enabled status"
+                    className="cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 outline-none hover:bg-gray-50"
+                  >
+                    <option value="All">
+                      Enabled + Disabled
+                    </option>
+                    <option value="Enabled">
+                      Enabled
+                    </option>
+                    <option value="Disabled">
+                      Disabled
+                    </option>
+                  </select>
+
+                  <select
+                    value={localValidation}
+                    onChange={(event) =>
+                      setLocalValidation(
+                        event.target.value as
+                          | "All"
+                          | "Has validation"
+                          | "No validation",
+                      )
+                    }
+                    aria-label="Filter by validation status"
+                    className="cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 outline-none hover:bg-gray-50"
+                  >
+                    <option value="All">
+                      All Validation States
+                    </option>
+                    <option value="Has validation">
+                      Has validation
+                    </option>
+                    <option value="No validation">
+                      No validation
+                    </option>
+                  </select>
+
+                  <select
                     value={localSort}
                     onChange={(event) =>
                       setLocalSort(
@@ -1691,7 +2767,7 @@ function AdminPage() {
                   <span className="text-xs text-gray-500">
                     Showing{" "}
                     {visibleLocalQuestions.length}{" "}
-                    of {adminQuestions.length}
+                    of {effectiveCatalog.length}
                     {selectedIds.size > 0 &&
                       ` · ${selectedIds.size} selected`}
                   </span>
@@ -1755,10 +2831,11 @@ function AdminPage() {
               aria-label="Import questions from a JSON file"
             />
 
-            {adminQuestions.length === 0 ? (
+            {effectiveCatalog.length === 0 ? (
               <p className="mt-3 text-sm text-gray-400">
-                No local questions yet. Created
-                questions will appear here.
+                No questions in the catalog yet.
+                Created questions will appear
+                here.
               </p>
             ) : visibleLocalQuestions.length === 0 ? (
               <div className="mt-4 rounded-lg border border-dashed border-gray-200 px-6 py-8 text-center">
@@ -1777,84 +2854,237 @@ function AdminPage() {
               </div>
             ) : (
               <ul className="mt-4 divide-y divide-gray-100">
-                {visibleLocalQuestions.map((item) => (
-                  <li
-                    key={item.id}
-                    className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(
-                        item.id,
+                {visibleLocalQuestions.map((item) => {
+                  const isAdminManaged =
+                    !builtInIds.has(item.id);
+                  const itemEnabled =
+                    isQuestionEnabled(item);
+                  const run =
+                    validationRuns[item.id];
+                  const validationLabel =
+                    item.validation === undefined
+                      ? "Not Applicable"
+                      : run !== undefined
+                        ? run.ok
+                          ? "Validated"
+                          : "Validation Failed"
+                        : "Not Validated";
+                  const deleteArmed =
+                    deleteConfirmId === item.id;
+                  const references = deleteArmed
+                    ? getQuestionReferences(item.id)
+                    : [];
+
+                  return (
+                    <li
+                      key={item.id}
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3"
+                    >
+                      {isAdminManaged && (
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(
+                            item.id,
+                          )}
+                          onChange={() =>
+                            toggleSelectedId(
+                              item.id,
+                            )
+                          }
+                          aria-label={`Select ${item.title}`}
+                          className="h-4 w-4 shrink-0 cursor-pointer accent-gray-900"
+                        />
                       )}
-                      onChange={() =>
-                        toggleSelectedId(item.id)
-                      }
-                      aria-label={`Select ${item.title}`}
-                      className="h-4 w-4 shrink-0 cursor-pointer accent-gray-900"
-                    />
 
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-gray-900">
-                        {item.title}
-                      </p>
+                      <div className="min-w-0 flex-1 basis-48">
+                        <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-gray-900">
+                          <span className="truncate">
+                            {item.title}
+                          </span>
 
-                      <p className="mt-0.5 text-xs text-gray-400">
-                        {item.difficulty} ·{" "}
-                        {item.questionType} ·{" "}
-                        {item.category}
-                        {item.companies.length > 0 &&
-                          ` · ${item.companies.join(", ")}`}{" "}
-                        ·{" "}
-                        <span className="font-mono">
-                          {item.id}
-                        </span>
-                      </p>
-                    </div>
+                          <span
+                            className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-medium ${
+                              isAdminManaged
+                                ? "bg-purple-50 text-purple-600"
+                                : "bg-gray-100 text-gray-500"
+                            }`}
+                          >
+                            {isAdminManaged
+                              ? "Admin"
+                              : "Built-in"}
+                          </span>
 
-                    <span className="ml-auto flex shrink-0 items-center gap-2">
-                      <Link
-                        to={`/question/${item.id}`}
-                        className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
-                      >
-                        Open
-                      </Link>
+                          {isAdminManaged && (
+                            <span
+                              className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-medium ${
+                                itemEnabled
+                                  ? "bg-emerald-50 text-emerald-600"
+                                  : "bg-gray-100 text-gray-500"
+                              }`}
+                            >
+                              {itemEnabled
+                                ? "Enabled"
+                                : "Disabled"}
+                            </span>
+                          )}
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleEdit(item)
-                        }
-                        className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-900"
-                      >
-                        <Pencil size={13} />
-                        Edit
-                      </button>
+                          <span
+                            title={
+                              run !== undefined
+                                ? run.message
+                                : item.validation ===
+                                    undefined
+                                  ? "No validation block configured"
+                                  : "Not validated this session"
+                            }
+                            className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-medium ${
+                              validationLabel ===
+                              "Validated"
+                                ? "bg-emerald-50 text-emerald-600"
+                                : validationLabel ===
+                                    "Validation Failed"
+                                  ? "bg-red-50 text-red-600"
+                                  : validationLabel ===
+                                      "Not Applicable"
+                                    ? "bg-gray-100 text-gray-400"
+                                    : "bg-amber-50 text-amber-600"
+                            }`}
+                          >
+                            {validationLabel}
+                          </span>
+                        </p>
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleDuplicate(item.id)
-                        }
-                        className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-900"
-                      >
-                        <Copy size={13} />
-                        Duplicate
-                      </button>
+                        <p className="mt-0.5 text-xs text-gray-400">
+                          {item.difficulty} ·{" "}
+                          {item.questionType} ·{" "}
+                          {item.category}
+                          {item.companies.length >
+                            0 &&
+                            ` · ${item.companies.join(", ")}`}{" "}
+                          ·{" "}
+                          <span className="font-mono">
+                            {item.id}
+                          </span>
+                        </p>
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleDelete(item.id)
-                        }
-                        className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-red-600"
-                      >
-                        <Trash2 size={13} />
-                        Delete
-                      </button>
-                    </span>
-                  </li>
-                ))}
+                        {deleteArmed && (
+                          <p className="mt-1 text-xs text-red-600">
+                            Delete this question? It
+                            leaves the active
+                            catalog
+                            {references.length > 0 &&
+                              ` (currently ${references.join(", ")})`}
+                            . Historical records
+                            keep working.
+                          </p>
+                        )}
+                      </div>
+
+                      <span className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
+                        <Link
+                          to={`/question/${item.id}`}
+                          className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                        >
+                          Open
+                        </Link>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handlePreviewQuestion(
+                              item,
+                            )
+                          }
+                          className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+                        >
+                          <Eye size={13} />
+                          Preview
+                        </button>
+
+                        {isAdminManaged ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleEdit(item)
+                              }
+                              className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+                            >
+                              <Pencil size={13} />
+                              Edit
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleToggleEnabled(
+                                  item.id,
+                                )
+                              }
+                              className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+                            >
+                              {itemEnabled
+                                ? "Disable"
+                                : "Enable"}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleDelete(item.id)
+                              }
+                              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs ${
+                                deleteArmed
+                                  ? "border-red-300 bg-red-50 font-medium text-red-600 hover:bg-red-100"
+                                  : "border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-red-600"
+                              }`}
+                            >
+                              <Trash2 size={13} />
+                              {deleteArmed
+                                ? "Confirm delete"
+                                : "Delete"}
+                            </button>
+
+                            {deleteArmed && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDeleteConfirmId(
+                                    null,
+                                  )
+                                }
+                                className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50"
+                              >
+                                Cancel
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled
+                            title="Built-in questions can't be deleted."
+                            className="flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-300"
+                          >
+                            <Trash2 size={13} />
+                            Delete
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleDuplicate(item.id)
+                          }
+                          className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+                        >
+                          <Copy size={13} />
+                          Duplicate
+                        </button>
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>

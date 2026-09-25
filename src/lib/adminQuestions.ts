@@ -4,10 +4,63 @@ import type {
   Question,
 } from "../data/questions";
 
+import { questions as builtInQuestions } from "../data/questions";
+
 const STORAGE_KEY = "queryvanta-admin-questions";
 
 const ADMIN_QUESTIONS_EVENT =
   "queryvanta-admin-questions-changed";
+
+export function isQuestionEnabled(
+  question: Question,
+): boolean {
+  return question.enabled !== false;
+}
+
+/**
+ * Canonical effective catalog: built-in questions
+ * first in catalog order, then admin questions.
+ * Built-in entries win on ID collision so the
+ * immutable catalog can never be shadowed.
+ * Disabled admin questions are kept (they remain
+ * editable and resolvable); use isQuestionEnabled
+ * to derive the active public catalog.
+ */
+export function combineQuestionCatalogs(
+  builtIn: Question[],
+  adminQuestions: Question[],
+): Question[] {
+  const seenIds = new Set(
+    builtIn.map((question) => question.id),
+  );
+
+  const combined = [...builtIn];
+
+  for (const question of adminQuestions) {
+    if (seenIds.has(question.id)) {
+      continue;
+    }
+
+    seenIds.add(question.id);
+    combined.push(question);
+  }
+
+  return combined;
+}
+
+/**
+ * Active public catalog: effective catalog without
+ * disabled admin questions. Powers discovery,
+ * navigation and new practice sessions. Frozen
+ * sessions, history and direct links keep resolving
+ * through the full effective catalog.
+ */
+export function getActiveQuestions(): Question[] {
+  return combineQuestionCatalogs(
+    builtInQuestions,
+    readAdminQuestions(),
+  ).filter(isQuestionEnabled);
+}
 
 const VALID_DIFFICULTIES: Difficulty[] = [
   "Easy",
@@ -54,18 +107,47 @@ function readAdminQuestions(): Question[] {
       window.localStorage.getItem(STORAGE_KEY);
 
     if (!storedValue) {
+      cachedRawValue = null;
+      cachedQuestions = null;
+
       return [];
+    }
+
+    // Serve referentially stable results while the
+    // stored payload is unchanged. Fresh parses on
+    // every read would hand out new object identities,
+    // retriggering downstream effects (for example the
+    // question database setup) and wiping just-shown
+    // execution results whenever progress, bookmarks
+    // or other state syncs.
+    if (
+      storedValue === cachedRawValue &&
+      cachedQuestions !== null
+    ) {
+      return cachedQuestions;
     }
 
     const parsedValue: unknown =
       JSON.parse(storedValue);
 
     if (!Array.isArray(parsedValue)) {
+      cachedRawValue = null;
+      cachedQuestions = null;
+
       return [];
     }
 
-    return parsedValue.filter(isValidAdminQuestion);
+    const filtered =
+      parsedValue.filter(isValidAdminQuestion);
+
+    cachedRawValue = storedValue;
+    cachedQuestions = filtered;
+
+    return filtered;
   } catch {
+    cachedRawValue = null;
+    cachedQuestions = null;
+
     return [];
   }
 }
@@ -78,6 +160,12 @@ function writeAdminQuestions(
       STORAGE_KEY,
       JSON.stringify(adminQuestions),
     );
+
+    // Invalidate the read cache so the next read
+    // re-parses the stored payload. Objects handed
+    // out previously stay untouched.
+    cachedRawValue = null;
+    cachedQuestions = null;
 
     window.dispatchEvent(
       new Event(ADMIN_QUESTIONS_EVENT),
@@ -92,12 +180,23 @@ export function getAdminQuestions(): Question[] {
   return readAdminQuestions();
 }
 
+function normalizeEnabled(
+  question: Question,
+): Question {
+  return {
+    ...question,
+    enabled: question.enabled !== false,
+  };
+}
+
 export function saveAdminQuestion(
   question: Question,
 ): Question[] {
   const adminQuestions = readAdminQuestions();
 
-  adminQuestions.push(question);
+  adminQuestions.push(
+    normalizeEnabled(question),
+  );
 
   writeAdminQuestions(adminQuestions);
 
@@ -117,11 +216,32 @@ export function updateAdminQuestion(
     return adminQuestions;
   }
 
-  adminQuestions[existingIndex] = question;
+  adminQuestions[existingIndex] =
+    normalizeEnabled(question);
 
   writeAdminQuestions(adminQuestions);
 
   return adminQuestions;
+}
+
+export function setAdminQuestionEnabled(
+  questionId: string,
+  enabled: boolean,
+): Question[] {
+  const adminQuestions = readAdminQuestions();
+
+  const existing = adminQuestions.find(
+    (item) => item.id === questionId,
+  );
+
+  if (!existing) {
+    return adminQuestions;
+  }
+
+  return updateAdminQuestion({
+    ...existing,
+    enabled,
+  });
 }
 
 function generateAdminQuestionId(): string {
@@ -152,6 +272,7 @@ export function duplicateAdminQuestion(
   copy.id = generateAdminQuestionId();
   copy.title = `${source.title} (Copy)`;
   copy.solved = false;
+  copy.enabled = true;
 
   adminQuestions.push(copy);
 
@@ -191,6 +312,9 @@ function isNonEmptyString(value: unknown): value is string {
     typeof value === "string" && value.trim() !== ""
   );
 }
+
+let cachedRawValue: string | null = null;
+let cachedQuestions: Question[] | null = null;
 
 function isStringArray(value: unknown): value is string[] {
   return (
@@ -312,7 +436,10 @@ function normalizeImportedQuestion(
     };
   }
 
-  if (value.questionType !== "SQL") {
+  if (
+    value.questionType !== "SQL" &&
+    value.questionType !== "PySpark"
+  ) {
     return {
       valid: false,
       error: `has an unsupported "questionType" ("${String(value.questionType)}")`,
@@ -407,6 +534,49 @@ function normalizeImportedQuestion(
     };
   }
 
+  if (
+    value.hint !== undefined &&
+    typeof value.hint !== "string"
+  ) {
+    return {
+      valid: false,
+      error: 'has an invalid "hint" (expected a string)',
+    };
+  }
+
+  if (
+    value.solutionCode !== undefined &&
+    typeof value.solutionCode !== "string"
+  ) {
+    return {
+      valid: false,
+      error:
+        'has an invalid "solutionCode" (expected a string)',
+    };
+  }
+
+  if (
+    value.explanation !== undefined &&
+    typeof value.explanation !== "string"
+  ) {
+    return {
+      valid: false,
+      error:
+        'has an invalid "explanation" (expected a string)',
+    };
+  }
+
+  if (
+    value.enabled !== undefined &&
+    typeof value.enabled !== "boolean"
+  ) {
+    return {
+      valid: false,
+      error:
+        'has an invalid "enabled" (expected a boolean)',
+    };
+  }
+
   let validation: Question["validation"];
 
   if (
@@ -465,7 +635,9 @@ function normalizeImportedQuestion(
       title: value.title as string,
       description: value.description as string,
       difficulty: value.difficulty as Difficulty,
-      questionType: "SQL",
+      questionType: value.questionType as
+        | "SQL"
+        | "PySpark",
       category: value.category as string,
       languages: value.languages as string[],
       tags: value.tags as string[],
@@ -474,11 +646,27 @@ function normalizeImportedQuestion(
         typeof value.solved === "boolean"
           ? value.solved
           : false,
+      enabled:
+        typeof value.enabled === "boolean"
+          ? value.enabled
+          : true,
       ...(database === undefined ? {} : { database }),
       starterCode:
         typeof value.starterCode === "string"
           ? value.starterCode
           : "",
+      ...(typeof value.hint === "string" &&
+      value.hint !== ""
+        ? { hint: value.hint }
+        : {}),
+      ...(typeof value.solutionCode === "string" &&
+      value.solutionCode !== ""
+        ? { solutionCode: value.solutionCode }
+        : {}),
+      ...(typeof value.explanation === "string" &&
+      value.explanation !== ""
+        ? { explanation: value.explanation }
+        : {}),
       ...(validation === undefined
         ? {}
         : { validation }),
@@ -532,13 +720,19 @@ export function importAdminQuestions(
   const knownIds = new Set(
     existing.map((question) => question.id),
   );
+  const builtInIds = new Set(
+    builtInQuestions.map((question) => question.id),
+  );
 
   const merged = [...existing];
   let imported = 0;
   let skipped = 0;
 
   for (const question of questions) {
-    if (knownIds.has(question.id)) {
+    if (
+      knownIds.has(question.id) ||
+      builtInIds.has(question.id)
+    ) {
       skipped += 1;
       continue;
     }

@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Code2,
+  Database,
   FolderKanban,
   Home,
   Play,
@@ -27,7 +28,9 @@ import { questions } from "./data/questions";
 import type { Question } from "./data/questions";
 import {
   ADMIN_QUESTIONS_EVENT,
+  combineQuestionCatalogs,
   getAdminQuestions,
+  isQuestionEnabled,
 } from "./lib/adminQuestions";
 import {
   getSolvedQuestionIds,
@@ -70,6 +73,11 @@ const navigation = [
   { label: "Tracks", icon: Target },
   { label: "Projects", icon: FolderKanban },
   { label: "Progress", icon: BarChart3, to: "/progress" },
+  {
+    label: "Question Management",
+    icon: Database,
+    to: "/admin/questions",
+  },
 ];
 
 const practiceItems = [
@@ -156,8 +164,17 @@ function App() {
     };
   }, []);
 
+  // Active public catalog: built-in questions plus
+  // enabled admin questions, without duplicates.
+  // Disabled admin questions stay stored and
+  // resolvable elsewhere but leave discovery,
+  // counts and new practice sessions.
   const allQuestions = useMemo(
-    () => [...questions, ...adminQuestions],
+    () =>
+      combineQuestionCatalogs(
+        questions,
+        adminQuestions,
+      ).filter(isQuestionEnabled),
     [adminQuestions],
   );
 
