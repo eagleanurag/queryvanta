@@ -19,7 +19,10 @@ export type PysparkClientOptions = {
   timeoutMs?: number;
 };
 
-const WORKER_URL = "/worker/pyspark-test-worker.js";
+// Base-aware: import.meta.env.BASE_URL is "/" in dev and
+// "/queryvanta/" in the production build, so the worker
+// resolves under both root and project-pages hosting.
+const WORKER_URL = `${import.meta.env.BASE_URL}worker/pyspark-test-worker.js`;
 
 const SPARK_REMOTE =
   "sc://localhost:8081/;transport=grpcweb";

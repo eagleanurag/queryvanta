@@ -66,7 +66,9 @@ PySpark runs against a Spark Connect endpoint through a same-origin Envoy
 grpc-web proxy:
 
 - Browser bundle requests `sc://localhost:8081/;transport=grpcweb` and loads
-  the worker from `/worker/pyspark-test-worker.js`.
+  the worker from `<base>/worker/pyspark-test-worker.js` (base-aware: `/`
+  in dev, `/queryvanta/` in the production build; the worker itself resolves
+  Pyodide/wheel assets relative to its own URL).
 - `SharedArrayBuffer` requires cross-origin isolation: the dev server already
   sends `Cross-Origin-Opener-Policy: same-origin` and
   `Cross-Origin-Embedder-Policy: credentialless` (see `vite.config.ts`).
@@ -86,14 +88,43 @@ site with client-side routing:
   routes such as `/learn/sql-foundations` or `/question/<id>`).
 - Send the COOP/COEP headers above on all responses (required for PySpark;
   harmless otherwise).
-- The app assumes it is served from the domain root (`/`). For sub-path
-  hosting (e.g. `https://<user>.github.io/<repo>/`), set Vite `base` to the
-  sub-path and rebuild.
+- The production build uses Vite `base: "/queryvanta/"` for project-pages
+  hosting. For domain-root hosting instead, change `base` to `"/"` (and keep
+  the router `basename` on `import.meta.env.BASE_URL`) and rebuild.
 - PySpark in production needs the Envoy proxy reachable at the configured
   same-origin endpoint; SQL/PGlite needs no server at all (WASM assets ship
   in `dist/assets`).
-- No environment variables or secrets are required. Nothing is deployed
-  automatically by this repository.
+- No environment variables or secrets are required.
+
+### GitHub Pages (configured)
+
+Target URL: `https://eagleanurag.github.io/queryvanta/`
+
+Deployment is automated by `.github/workflows/deploy.yml` (push to `main`
+or manual dispatch): checkout → setup Node 22 → `npm ci` → `npm run build`
+→ copy `dist/index.html` to `dist/404.html` → upload artifact → deploy. No
+secrets are required beyond the built-in `GITHUB_TOKEN` permissions
+(`contents: read`, `pages: write`, `id-token: write`).
+
+GitHub Pages specifics and honest limitations:
+
+- **Base path:** the build already targets `/queryvanta/`; the router uses
+  the same base, so links, lazy chunks, WASM and worker assets resolve.
+- **SPA fallback:** Pages offers no server rewrite config. The workflow
+  ships a `404.html` duplicate of the app, so deep links and refreshes load
+  the app instead of a blank GitHub 404 page. Known limitation: those loads
+  return HTTP status 404 (content is correct; the in-app Not Found page is
+  used only for genuinely unknown in-app addresses reached via client
+  navigation).
+- **PySpark on Pages:** GitHub Pages cannot send COOP/COEP headers, so pages
+  are not cross-origin isolated there and `SharedArrayBuffer` is unavailable.
+  Consequence, verified by design: **PySpark execution does not boot on the
+  GitHub Pages deployment** (it shows the explanatory isolation error);
+  everything else — SQL/PGlite, learning, practice, interviews (untimed and
+  timed logic), admin — works fully. Running PySpark additionally requires
+  the external Spark/Envoy service from the deployment notes above; the
+  static frontend and the Spark service are separate deployment components,
+  and no backend was added to this repository.
 
 ## Routes
 

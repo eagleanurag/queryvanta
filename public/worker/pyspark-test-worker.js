@@ -1,9 +1,14 @@
 /* QueryVanta PySpark browser PoC worker.
  *
  * Runs inside a Web Worker (module). Boots same-origin Pyodide
- * (/pyodide/, required under COOP/COEP), micropip-installs the
- * vendored wheels (/wheels/), and executes Python snippets posted
- * by the main thread, returning captured stdout.
+ * (../pyodide/ relative to this worker file, required under
+ * COOP/COEP), micropip-installs the vendored wheels (../wheels/),
+ * and executes Python snippets posted by the main thread,
+ * returning captured stdout.
+ *
+ * All asset URLs derive from self.location so the worker works
+ * both at a domain root and under a project-pages subpath
+ * (e.g. /queryvanta/).
  *
  * The blocking Spark Connect transport (SharedArrayBuffer +
  * Atomics handshake) is serviced on the MAIN thread by the bridge
@@ -18,8 +23,10 @@
 const CONTROL_SLOTS = 8;
 const DATA_BYTES = 16 * 1024 * 1024;
 
-const PYODIDE_INDEX_URL =
-  new URL("/pyodide/", self.location.origin).href;
+const PYODIDE_INDEX_URL = new URL(
+  "../pyodide/",
+  self.location.href
+).href;
 
 const PYODIDE_PKGS = [
   "micropip",
@@ -29,17 +36,23 @@ const PYODIDE_PKGS = [
   "zstandard",
 ];
 
-const origin = self.location.origin;
+function wheelUrl(fileName) {
+  return new URL(`../wheels/${fileName}`, self.location.href)
+    .href;
+}
+
 const WHEEL_URLS = [
-  `${origin}/wheels/protobuf-7.36.2-py3-none-any.whl`,
-  `${origin}/wheels/googleapis_common_protos-1.75.3-py3-none-any.whl`,
-  `${origin}/wheels/pyspark_connect_web-0.2.0-py3-none-any.whl`,
+  wheelUrl("protobuf-7.36.2-py3-none-any.whl"),
+  wheelUrl("googleapis_common_protos-1.75.3-py3-none-any.whl"),
+  wheelUrl("pyspark_connect_web-0.2.0-py3-none-any.whl"),
 ];
 
 // Slim Spark Connect client (pure Python, no JVM/py4j). Installed with
 // deps:false because its grpcio base dependency has no Pyodide wheel;
 // pyspark-connect-web stubs grpc at runtime instead.
-const PYSPARK_CLIENT_WHEEL = `${origin}/wheels/pyspark_client-4.2.0-py2.py3-none-any.whl`;
+const PYSPARK_CLIENT_WHEEL = wheelUrl(
+  "pyspark_client-4.2.0-py2.py3-none-any.whl"
+);
 
 function status(stage, message) {
   self.postMessage({ type: "pcw_status", stage, message });
