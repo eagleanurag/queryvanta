@@ -27,6 +27,10 @@ export const LearnTopicPage = lazy(
   () => import("./pages/LearnTopicPage"),
 );
 
+export const LandingPage = lazy(
+  () => import("./pages/LandingPage"),
+);
+
 export const PracticeHistoryDetailPage = lazy(
   () =>
     import("./pages/PracticeHistoryDetailPage"),

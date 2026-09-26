@@ -13,28 +13,28 @@ import {
   type Difficulty,
   type Question,
   type QuestionType,
-} from "../data/questions";
+} from "../data/questions.ts";
 import {
   ADMIN_QUESTIONS_EVENT,
   combineQuestionCatalogs,
   getAdminQuestions,
   isQuestionEnabled,
-} from "./adminQuestions";
+} from "./adminQuestions.ts";
 import {
   createPracticeSession,
   selectSessionQuestionIds,
-} from "./practiceSession";
+} from "./practiceSession.ts";
 import type {
   PracticeSelectionMode,
   PracticeSessionOrigin,
-} from "./practiceSession";
+} from "./practiceSession.ts";
 
 export { selectSessionQuestionIds };
 import {
   DEFAULT_FILTERS,
   filterQuestions,
-} from "./questionFilter";
-import type { DiscoveryFilters } from "./questionFilter";
+} from "./questionFilter.ts";
+import type { DiscoveryFilters } from "./questionFilter.ts";
 
 export type { PracticeSelectionMode };
 

@@ -2,9 +2,14 @@ import { ArrowLeft, Compass } from "lucide-react";
 
 import { Link } from "react-router-dom";
 
+import SEO from "../components/SEO";
+import { NOT_FOUND_SEO } from "../lib/seo";
+
 function NotFoundPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#f6f7f9] p-8 text-[#202124]">
+      <SEO meta={NOT_FOUND_SEO} />
+
       <div className="w-full max-w-xl rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
         <span className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-gray-500">
           <Compass size={24} />

@@ -47,6 +47,12 @@ import {
 import QuestionCard from "./components/QuestionCard";
 import QuestionFilters from "./components/QuestionFilters";
 import PracticeSetupModal from "./components/PracticeSetupModal";
+import SEO from "./components/SEO";
+import {
+  HOME_SEO,
+  webAppJsonLd,
+  websiteJsonLd,
+} from "./lib/seo";
 import {
   createPracticeSession,
   selectSessionQuestionIds,
@@ -569,6 +575,23 @@ function App() {
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+      <SEO
+        meta={
+          searchParams.toString() === ""
+            ? HOME_SEO
+            : {
+                ...HOME_SEO,
+                canonicalPath: "/",
+                robots: "noindex,follow",
+              }
+        }
+        jsonLd={
+          searchParams.toString() === ""
+            ? [websiteJsonLd(), webAppJsonLd()]
+            : []
+        }
+      />
+
       {/* Mobile drawer backdrop */}
       {sidebarOpen && (
         <button
@@ -1165,6 +1188,89 @@ function App() {
               </div>
             </aside>
           </div>
+
+          <section
+            aria-label="About QueryVanta practice areas"
+            className="mx-auto mt-8 max-w-[1000px] rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+          >
+            <h2 className="font-semibold text-gray-900">
+              Free SQL & PySpark practice for
+              Data Engineering
+            </h2>
+
+            <p className="mt-2 text-sm leading-6 text-gray-600">
+              QueryVanta is a free
+              browser-based practice platform
+              for SQL, PySpark and Data
+              Engineering interview
+              preparation. SQL runs on
+              PostgreSQL in your browser and
+              PySpark runs on a real Spark
+              engine — with hints, solutions,
+              learning paths and timed mock
+              interviews included.
+            </p>
+
+            <nav
+              aria-label="Practice areas"
+              className="mt-4"
+            >
+              <ul className="flex flex-wrap gap-2">
+                {[
+                  {
+                    to: "/sql-practice",
+                    label: "Practice SQL questions",
+                  },
+                  {
+                    to: "/pyspark-practice",
+                    label: "Practice PySpark exercises",
+                  },
+                  {
+                    to: "/data-engineering-practice",
+                    label:
+                      "Data Engineering practice",
+                  },
+                  {
+                    to: "/sql-interview-prep",
+                    label:
+                      "Prepare for SQL interviews",
+                  },
+                  {
+                    to: "/pyspark-interview-prep",
+                    label:
+                      "Prepare for PySpark interviews",
+                  },
+                  {
+                    to: "/data-analyst-sql",
+                    label:
+                      "SQL for data analysts",
+                  },
+                  {
+                    to: "/big-data-practice",
+                    label: "Big Data practice",
+                  },
+                  {
+                    to: "/learn",
+                    label: "Browse learning paths",
+                  },
+                  {
+                    to: "/interview",
+                    label:
+                      "Prepare for Data Engineer interviews",
+                  },
+                ].map((area) => (
+                  <li key={area.to}>
+                    <Link
+                      to={area.to}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                    >
+                      {area.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          </section>
         </div>
       </main>
 

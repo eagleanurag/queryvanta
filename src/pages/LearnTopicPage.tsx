@@ -32,6 +32,13 @@ import {
 } from "../lib/learning";
 import PracticeSetupModal from "../components/PracticeSetupModal";
 import QuestionCard from "../components/QuestionCard";
+import Breadcrumbs from "../components/Breadcrumbs";
+import SEO from "../components/SEO";
+import {
+  breadcrumbJsonLd,
+  learnTopicSeo,
+  NOT_FOUND_SEO,
+} from "../lib/seo";
 
 function LearnTopicPage() {
   const { topicId } = useParams();
@@ -127,6 +134,8 @@ function LearnTopicPage() {
   if (!topic) {
     return (
       <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+        <SEO meta={NOT_FOUND_SEO} />
+
         <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center p-8 text-center">
           <h1 className="text-xl font-semibold text-gray-900">
             Topic not found
@@ -151,6 +160,24 @@ function LearnTopicPage() {
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+      <SEO
+        meta={learnTopicSeo(
+          topic.id,
+          topic.name,
+          topic.total,
+        )}
+        jsonLd={[
+          breadcrumbJsonLd([
+            { name: "Home", path: "/" },
+            { name: "Learn", path: "/learn" },
+            {
+              name: topic.name,
+              path: `/learn/topic/${topic.id}`,
+            },
+          ]),
+        ]}
+      />
+
       <header className="border-b border-gray-200 bg-white">
         <div className="flex h-[72px] items-center px-8">
           <Link
@@ -171,7 +198,18 @@ function LearnTopicPage() {
 
       <main className="p-8">
         <div className="mx-auto max-w-[1000px]">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <Breadcrumbs
+            items={[
+              { name: "Home", path: "/" },
+              { name: "Learn", path: "/learn" },
+              {
+                name: topic.name,
+                path: `/learn/topic/${topic.id}`,
+              },
+            ]}
+          />
+
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h1 className="text-2xl font-semibold text-gray-900">
                 {topic.name}

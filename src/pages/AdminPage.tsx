@@ -47,6 +47,11 @@ import {
   validateImportedQuestions,
 } from "../lib/adminQuestions";
 import { getBookmarkedQuestionIds } from "../lib/bookmarks";
+import SEO from "../components/SEO";
+import {
+  ADMIN_QUESTIONS_SEO,
+  ADMIN_SEO,
+} from "../lib/seo";
 import { createQuestionDatabase } from "../lib/pglite";
 import { getPracticeHistory } from "../lib/practiceSession";
 import { isQuestionSolved } from "../lib/progress";
@@ -1693,6 +1698,14 @@ function AdminPage() {
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+      <SEO
+        meta={
+          location.pathname.includes("/questions")
+            ? ADMIN_QUESTIONS_SEO
+            : ADMIN_SEO
+        }
+      />
+
       <header className="border-b border-gray-200 bg-white">
         <div className="flex h-[72px] items-center px-8">
           <Link

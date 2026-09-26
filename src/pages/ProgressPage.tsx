@@ -30,10 +30,12 @@ import {
 } from "../lib/bookmarks";
 import { computeDashboardStats } from "../lib/dashboard";
 import PracticeAnalytics from "../components/PracticeAnalytics";
+import SEO from "../components/SEO";
 import {
   getSolvedQuestionIds,
   PROGRESS_EVENT,
 } from "../lib/progress";
+import { PROGRESS_SEO } from "../lib/seo";
 
 function useSyncedState<T>(
   read: () => T,
@@ -157,6 +159,8 @@ function ProgressPage() {
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+      <SEO meta={PROGRESS_SEO} />
+
       <header className="border-b border-gray-200 bg-white">
         <div className="flex h-[72px] items-center px-8">
           <Link

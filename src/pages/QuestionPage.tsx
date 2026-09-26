@@ -54,6 +54,8 @@ import {
   recordAttempt,
 } from "../lib/attempts";
 import type { QuestionAttempt } from "../lib/attempts";
+import Breadcrumbs from "../components/Breadcrumbs";
+import SEO from "../components/SEO";
 import { createQuestionDatabase } from "../lib/pglite";
 import { PysparkClient } from "../lib/pysparkClient";
 import {
@@ -67,6 +69,13 @@ import {
   markQuestionSolved,
   PROGRESS_EVENT,
 } from "../lib/progress";
+import {
+  ADMIN_PREVIEW_SEO,
+  breadcrumbJsonLd,
+  NOT_FOUND_SEO,
+  questionSeo,
+} from "../lib/seo";
+import { slugifyTopic } from "../lib/learning";
 import { validateResult } from "../lib/validation";
 
 type ExecutionStatus =
@@ -477,6 +486,86 @@ function QuestionPage({
     currentQuestionIndex < navQuestions.length - 1
       ? navQuestions[currentQuestionIndex + 1]
       : null;
+
+  const showPublicSeo = !hideChrome && !isPreview;
+
+  const breadcrumbItems = useMemo(() => {
+    if (!question || !showPublicSeo) {
+      return [];
+    }
+
+    const items = [{ name: "Home", path: "/" }];
+
+    if (question.questionType === "SQL") {
+      items.push({
+        name: "SQL Practice",
+        path: "/sql-practice",
+      });
+    } else if (
+      question.questionType === "PySpark"
+    ) {
+      items.push({
+        name: "PySpark Practice",
+        path: "/pyspark-practice",
+      });
+    }
+
+    if (question.category.trim() !== "") {
+      items.push({
+        name: question.category,
+        path: `/learn/topic/${slugifyTopic(question.category)}`,
+      });
+    }
+
+    items.push({
+      name: question.title,
+      path: `/question/${question.id}`,
+    });
+
+    return items;
+  }, [question, showPublicSeo]);
+
+  const relatedQuestions = useMemo(() => {
+    if (!question || !showPublicSeo) {
+      return [];
+    }
+
+    const others = activeQuestions.filter(
+      (item) => item.id !== question.id,
+    );
+
+    const byScore = others.map((item) => {
+      let score = 0;
+
+      if (item.category === question.category) {
+        score += 3;
+      }
+
+      if (
+        item.questionType === question.questionType
+      ) {
+        score += 2;
+      }
+
+      if (
+        item.difficulty === question.difficulty
+      ) {
+        score += 1;
+      }
+
+      return { item, score };
+    });
+
+    byScore.sort(
+      (a, b) =>
+        b.score - a.score ||
+        a.item.title.localeCompare(b.item.title),
+    );
+
+    return byScore
+      .slice(0, 4)
+      .map((entry) => entry.item);
+  }, [activeQuestions, question, showPublicSeo]);
 
   const database = question?.database;
 
@@ -1106,6 +1195,8 @@ function QuestionPage({
   if (isPreviewRoute && previewQuestion === null) {
     return (
       <div className="min-h-screen bg-[#f6f7f9] p-8">
+        <SEO meta={ADMIN_PREVIEW_SEO} />
+
         <div className="mx-auto max-w-3xl rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
           <h1 className="text-xl font-semibold text-gray-900">
             Preview is unavailable
@@ -1131,6 +1222,8 @@ function QuestionPage({
   if (!question) {
     return (
       <div className="min-h-screen bg-[#f6f7f9] p-8">
+        <SEO meta={NOT_FOUND_SEO} />
+
         <div className="mx-auto max-w-3xl rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
           <h1 className="text-xl font-semibold text-gray-900">
             Question not found
@@ -1157,6 +1250,15 @@ function QuestionPage({
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+      {showPublicSeo && (
+        <SEO
+          meta={questionSeo(question)}
+          jsonLd={[
+            breadcrumbJsonLd(breadcrumbItems),
+          ]}
+        />
+      )}
+
       {!hideChrome && (
       <header className="border-b border-gray-200 bg-white">
         <div className="flex h-[72px] items-center px-8">
@@ -1238,6 +1340,14 @@ function QuestionPage({
 
       <main className="p-8">
         <div className="mx-auto max-w-[1400px]">
+          {showPublicSeo && (
+            <div className="mb-4">
+              <Breadcrumbs
+                items={breadcrumbItems}
+              />
+            </div>
+          )}
+
           <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-center gap-2">
               <span
@@ -2004,6 +2114,39 @@ function QuestionPage({
               )}
             </div>
           </section>
+
+          {showPublicSeo &&
+            relatedQuestions.length > 0 && (
+              <section
+                aria-label="Related questions"
+                className="mt-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
+              >
+                <h2 className="font-semibold text-gray-900">
+                  Related questions
+                </h2>
+
+                <ul className="mt-3 space-y-2">
+                  {relatedQuestions.map((related) => (
+                    <li key={related.id}>
+                      <Link
+                        to={`/question/${related.id}`}
+                        className="flex flex-wrap items-center gap-x-2 text-sm text-gray-700 hover:text-gray-900 hover:underline"
+                      >
+                        <span className="font-medium">
+                          {related.title}
+                        </span>
+
+                        <span className="text-xs text-gray-400">
+                          {related.questionType} ·{" "}
+                          {related.category} ·{" "}
+                          {related.difficulty}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
           {!isPreview && !hideChrome && (
             <nav className="mt-6 flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">

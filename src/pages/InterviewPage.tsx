@@ -6,6 +6,7 @@ import {
 
 import {
   ArrowLeft,
+  ArrowRight,
   Briefcase,
   Clock,
   Play,
@@ -16,6 +17,7 @@ import {
   useNavigate,
 } from "react-router-dom";
 
+import SEO from "../components/SEO";
 import type {
   Difficulty,
   QuestionType,
@@ -37,6 +39,7 @@ import {
   useActiveCatalog,
 } from "../lib/learning";
 import type { PracticeSelectionMode } from "../lib/learning";
+import { INTERVIEW_SEO } from "../lib/seo";
 
 const INTERVIEW_TYPES: ("All" | QuestionType)[] = [
   "All",
@@ -256,6 +259,8 @@ function InterviewPage() {
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+      <SEO meta={INTERVIEW_SEO} />
+
       <header className="border-b border-gray-200 bg-white">
         <div className="flex h-[72px] items-center px-8">
           <Link
@@ -640,6 +645,50 @@ function InterviewPage() {
               </button>
             </div>
           </section>
+
+          <nav
+            aria-label="Interview preparation guides"
+            className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+          >
+            <h2 className="font-semibold text-gray-900">
+              Preparation guides
+            </h2>
+
+            <p className="mt-1 text-sm text-gray-500">
+              Warm up with focused practice
+              before your mock interview.
+            </p>
+
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {[
+                {
+                  to: "/sql-interview-prep",
+                  label:
+                    "SQL interview preparation",
+                },
+                {
+                  to: "/pyspark-interview-prep",
+                  label:
+                    "PySpark interview preparation",
+                },
+                {
+                  to: "/data-engineering-practice",
+                  label:
+                    "Data Engineering practice",
+                },
+              ].map((guide) => (
+                <li key={guide.to}>
+                  <Link
+                    to={guide.to}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                  >
+                    {guide.label}
+                    <ArrowRight size={13} />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
         </div>
       </main>
     </div>

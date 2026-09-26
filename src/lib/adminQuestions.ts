@@ -4,7 +4,7 @@ import type {
   Question,
 } from "../data/questions";
 
-import { questions as builtInQuestions } from "../data/questions";
+import { questions as builtInQuestions } from "../data/questions.ts";
 
 const STORAGE_KEY = "queryvanta-admin-questions";
 

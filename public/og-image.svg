@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="QueryVanta — Free SQL and PySpark Practice for Data Engineering">
+  <rect width="1200" height="630" fill="#111827"/>
+  <circle cx="200" cy="315" r="96" fill="#ffffff"/>
+  <text x="200" y="352" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="104" font-weight="bold" fill="#111827">Q</text>
+  <text x="340" y="290" font-family="Inter, Arial, sans-serif" font-size="84" font-weight="bold" fill="#ffffff">QueryVanta</text>
+  <text x="342" y="360" font-family="Inter, Arial, sans-serif" font-size="40" fill="#d1d5db">Free SQL &amp; PySpark Practice</text>
+  <text x="342" y="415" font-family="Inter, Arial, sans-serif" font-size="40" fill="#9ca3af">for Data Engineering</text>
+</svg>

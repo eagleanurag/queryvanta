@@ -27,6 +27,7 @@ import {
 
 import { getAllAttempts } from "../lib/attempts";
 import { getBookmarkedQuestionIds } from "../lib/bookmarks";
+import SEO from "../components/SEO";
 import {
   getSolvedQuestionIds,
   PROGRESS_EVENT,
@@ -46,6 +47,7 @@ import {
   WEAK_PRACTICE_SIZE,
 } from "../lib/learning";
 import type { PracticePreset } from "../lib/learning";
+import { LEARN_SEO } from "../lib/seo";
 
 const PATH_ICONS: Record<string, typeof Database> = {
   Database,
@@ -215,6 +217,8 @@ function LearnPage() {
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+      <SEO meta={LEARN_SEO} />
+
       <header className="border-b border-gray-200 bg-white">
         <div className="flex h-[72px] items-center px-8">
           <Link

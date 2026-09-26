@@ -26,6 +26,11 @@ import {
 } from "../lib/practiceSession";
 
 import PracticeSessionReview from "../components/PracticeSessionReview";
+import SEO from "../components/SEO";
+import {
+  HISTORY_DETAIL_SEO,
+  NOT_FOUND_SEO,
+} from "../lib/seo";
 
 function PracticeHistoryDetailPage() {
   const { sessionId } = useParams();
@@ -114,6 +119,8 @@ function PracticeHistoryDetailPage() {
   if (!entry) {
     return (
       <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+        <SEO meta={NOT_FOUND_SEO} />
+
         <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center p-8 text-center">
           <h1 className="text-xl font-semibold text-gray-900">
             Session not found
@@ -150,6 +157,8 @@ function PracticeHistoryDetailPage() {
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+      <SEO meta={HISTORY_DETAIL_SEO} />
+
       <header className="border-b border-gray-200 bg-white">
         <div className="flex h-[72px] items-center px-8">
           <Link

@@ -38,6 +38,8 @@ import type { PracticeSession } from "../lib/practiceSession";
 import {
   formatCountdown,
 } from "../lib/learning";
+import SEO from "../components/SEO";
+import { PRACTICE_SEO } from "../lib/seo";
 
 import QuestionPage from "./QuestionPage";
 import PracticeHistoryList from "../components/PracticeHistoryList";
@@ -237,6 +239,8 @@ function PracticePage() {
   if (!session) {
     return (
       <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+        <SEO meta={PRACTICE_SEO} />
+
         <main className="p-8">
           <div className="mx-auto max-w-2xl">
             <div className="flex flex-col items-center px-8 py-12 text-center">
@@ -293,6 +297,8 @@ function PracticePage() {
 
     return (
       <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+        <SEO meta={PRACTICE_SEO} />
+
         <header className="border-b border-gray-200 bg-white">
           <div className="flex h-[72px] items-center px-8">
             <Link
@@ -636,6 +642,8 @@ function PracticePage() {
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+      <SEO meta={PRACTICE_SEO} />
+
       <header className="border-b border-gray-200 bg-white">
         <div className="flex h-[72px] items-center px-8">
           <Link

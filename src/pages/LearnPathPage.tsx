@@ -22,6 +22,13 @@ import {
   getSolvedQuestionIds,
   PROGRESS_EVENT,
 } from "../lib/progress";
+import Breadcrumbs from "../components/Breadcrumbs";
+import SEO from "../components/SEO";
+import {
+  breadcrumbJsonLd,
+  learnPathSeo,
+  NOT_FOUND_SEO,
+} from "../lib/seo";
 import {
   getLearningPath,
   getPathPool,
@@ -152,6 +159,8 @@ function LearnPathPage() {
   if (!path) {
     return (
       <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+        <SEO meta={NOT_FOUND_SEO} />
+
         <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center p-8 text-center">
           <h1 className="text-xl font-semibold text-gray-900">
             Learning path not found
@@ -175,6 +184,24 @@ function LearnPathPage() {
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+      <SEO
+        meta={learnPathSeo(
+          path.id,
+          path.title,
+          path.description,
+        )}
+        jsonLd={[
+          breadcrumbJsonLd([
+            { name: "Home", path: "/" },
+            { name: "Learn", path: "/learn" },
+            {
+              name: path.title,
+              path: `/learn/${path.id}`,
+            },
+          ]),
+        ]}
+      />
+
       <header className="border-b border-gray-200 bg-white">
         <div className="flex h-[72px] items-center px-8">
           <Link
@@ -195,7 +222,18 @@ function LearnPathPage() {
 
       <main className="p-8">
         <div className="mx-auto max-w-[1000px]">
-          <h1 className="text-2xl font-semibold text-gray-900">
+          <Breadcrumbs
+            items={[
+              { name: "Home", path: "/" },
+              { name: "Learn", path: "/learn" },
+              {
+                name: path.title,
+                path: `/learn/${path.id}`,
+              },
+            ]}
+          />
+
+          <h1 className="mt-4 text-2xl font-semibold text-gray-900">
             {path.title}
           </h1>
 

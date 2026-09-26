@@ -1,0 +1,24 @@
+# QueryVanta robots.txt — public content is crawlable by
+# general search engines and AI-search crawlers.
+# Private/utility areas are excluded from crawling; they also
+# carry noindex metadata (robots.txt alone never hides a URL
+# from an index, it only guides crawl budget).
+#
+# Crawler notes:
+# - OAI-SearchBot powers ChatGPT Search results. Allowing it
+#   here supports search visibility only.
+# - GPTBot (training-data crawling) is a different crawler and
+#   is not separately addressed; no training consent is implied
+#   by search-visibility allowances.
+# - PerplexityBot, Bingbot and Googlebot are covered by the
+#   generic rule below and are not blocked.
+
+User-agent: *
+Allow: /
+
+Disallow: /admin/
+Disallow: /admin/preview
+Disallow: /practice/history/
+Disallow: /pyspark-test
+
+Sitemap: https://eagleanurag.github.io/queryvanta/sitemap.xml

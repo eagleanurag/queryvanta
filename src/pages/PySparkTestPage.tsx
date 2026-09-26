@@ -16,6 +16,8 @@ import {
   PysparkClient,
 } from "../lib/pysparkClient";
 import type { PysparkBootStage } from "../lib/pysparkClient";
+import SEO from "../components/SEO";
+import { PYSPARK_TEST_SEO } from "../lib/seo";
 
 type Stage =
   | "idle"
@@ -171,6 +173,8 @@ function PySparkTestPage() {
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+      <SEO meta={PYSPARK_TEST_SEO} />
+
       <header className="border-b border-gray-200 bg-white">
         <div className="flex h-[72px] items-center px-8">
           <Link
