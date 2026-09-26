@@ -616,6 +616,10 @@ function PracticePage() {
   };
 
   const handleFinish = () => {
+    if (session.status === "finished") {
+      return;
+    }
+
     setSession(finishPracticeSession(session));
   };
 

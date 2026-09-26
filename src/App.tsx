@@ -17,12 +17,14 @@ import {
   Database,
   FolderKanban,
   Home,
+  Menu,
   Play,
   Search,
   Settings,
   Star,
   Target,
   Timer,
+  X,
 } from "lucide-react";
 
 import { questions } from "./data/questions";
@@ -69,7 +71,7 @@ const BOOKMARKED_DISCOVERY_SEARCH =
   }).toString();
 
 const navigation = [
-  { label: "Home", icon: Home },
+  { label: "Home", icon: Home, to: "/" },
   { label: "Learn", icon: BookOpen, to: "/learn" },
   { label: "Tracks", icon: Target },
   { label: "Projects", icon: FolderKanban },
@@ -99,6 +101,36 @@ function App() {
 
   const [practiceSource, setPracticeSource] =
     useState<PracticeSource | null>(null);
+
+  // Mobile navigation drawer: the sidebar is a
+  // permanent fixture on desktop (lg+) and slides
+  // over content on smaller screens.
+  const [sidebarOpen, setSidebarOpen] =
+    useState(false);
+
+  useEffect(() => {
+    if (!sidebarOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener(
+      "keydown",
+      handleKeyDown,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "keydown",
+        handleKeyDown,
+      );
+    };
+  }, [sidebarOpen]);
 
   const [initialFilters] =
     useState<DiscoveryFilters>(() =>
@@ -537,8 +569,24 @@ function App() {
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-[#202124]">
+      {/* Mobile drawer backdrop */}
+      {sidebarOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation menu"
+          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 z-10 bg-gray-900/40 lg:hidden"
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-20 w-[252px] border-r border-gray-200 bg-white">
+      <aside
+        className={`fixed inset-y-0 left-0 z-20 w-[252px] border-r border-gray-200 bg-white transition-transform duration-200 lg:translate-x-0 ${
+          sidebarOpen
+            ? "translate-x-0"
+            : "-translate-x-full"
+        }`}
+      >
         <div className="flex h-full flex-col">
           {/* Brand */}
           <div className="flex h-[76px] items-center px-6">
@@ -555,10 +603,24 @@ function App() {
                 Data Engineering Practice
               </div>
             </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                setSidebarOpen(false)
+              }
+              aria-label="Close navigation menu"
+              className="ml-auto rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 lg:hidden"
+            >
+              <X size={18} />
+            </button>
           </div>
 
           {/* Navigation */}
-          <nav className="px-3">
+          <nav
+            className="px-3"
+            aria-label="Primary"
+          >
             {navigation.map((item) => {
               const Icon = item.icon;
 
@@ -567,6 +629,9 @@ function App() {
                   <Link
                     key={item.label}
                     to={item.to}
+                    onClick={() =>
+                      setSidebarOpen(false)
+                    }
                     className="mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[14px] text-gray-600 transition hover:bg-gray-100 hover:text-gray-900"
                   >
                     <Icon
@@ -645,18 +710,32 @@ function App() {
       </aside>
 
       {/* Main content */}
-      <main className="ml-[252px] min-h-screen">
+      <main className="ml-0 min-h-screen lg:ml-[252px]">
         {/* Header */}
         <header className="sticky top-0 z-10 border-b border-gray-200 bg-white/95 backdrop-blur">
-          <div className="flex h-[76px] items-center justify-between px-8">
-            <div>
-              <h1 className="text-xl font-semibold text-gray-900">
-                Coding Problems
-              </h1>
+          <div className="flex h-[76px] items-center justify-between px-4 sm:px-8">
+            <div className="flex min-w-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setSidebarOpen(true)
+                }
+                aria-label="Open navigation menu"
+                className="shrink-0 rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-900 lg:hidden"
+              >
+                <Menu size={20} />
+              </button>
 
-              <p className="mt-0.5 text-xs text-gray-500">
-                Practice SQL, PySpark and Data Engineering
-              </p>
+              <div className="min-w-0">
+                <h1 className="truncate text-xl font-semibold text-gray-900">
+                  Coding Problems
+                </h1>
+
+                <p className="mt-0.5 hidden text-xs text-gray-500 min-[420px]:block">
+                  Practice SQL, PySpark and
+                  Data Engineering
+                </p>
+              </div>
             </div>
 
             <div className="flex items-center gap-4">
@@ -730,7 +809,7 @@ function App() {
         </header>
 
         {/* Page */}
-        <div className="p-8">
+        <div className="p-4 sm:p-8">
           {/* Search + Filters */}
           <QuestionFilters
             searchTerm={searchTerm}

@@ -1,75 +1,128 @@
-# React + TypeScript + Vite
+# QueryVanta
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+QueryVanta is a browser-local Data Engineering learning and interview-practice
+platform: question discovery, real SQL execution, real browser PySpark
+execution, structured learning paths, timed mock interviews, practice
+analytics, and admin question management — with no backend.
 
-Currently, two official plugins are available:
+## What it does
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Questions discovery** — search, filter (type, difficulty, language,
+  company, status, category, bookmarks) with URL-synced filters, pagination,
+  and previous/next navigation that preserves the discovery context.
+- **SQL execution** — PostgreSQL runs directly in the browser via PGlite;
+  answers are validated against expected result sets.
+- **PySpark execution** — real Spark 4.2.0 execution in the browser through a
+  Pyodide Web Worker + Spark Connect (see “PySpark requirements” below).
+- **Learning help** — hints, solutions and explanations per question. Viewing
+  them never marks anything solved.
+- **Bookmarks & solved progress** — persisted locally, synced across tabs.
+- **Practice sessions** — sequential or random, bookmarked sets, frozen
+  question order, resume after refresh, review, and a bounded history
+  (latest 20) with analytics.
+- **Learning** (`/learn`) — learning paths generated from live catalog
+  metadata, topic explorer, deterministic weak-area practice, and quick
+  practice presets.
+- **Interview practice** (`/interview`) — SQL / PySpark / mixed mock
+  interviews, timed (15/30/45/60 min) or untimed, with an absolute persisted
+  end timestamp, auto-finish at expiry, and factual summaries (no fake
+  scores).
+- **Admin Question Management** (`/admin/questions`) — create, edit,
+  duplicate, preview, enable/disable, delete (two-step confirm), JSON
+  import/export, and real SQL / PySpark validation of solution code.
 
-## React Compiler
+All application data lives in the browser (`localStorage` for catalog
+overrides, progress, bookmarks, history and attempts; `sessionStorage` for
+the active practice session). There is no backend, no account, and no
+network dependency except the Spark Connect proxy required for PySpark.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Development
 
-## Expanding the ESLint configuration
+Requirements: Node.js 22+, Docker (only for the optional local Spark stack
+used by PySpark execution).
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```sh
+npm install
+npm run dev        # serves on http://localhost:5173 with COOP/COEP headers
 ```
 
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
+Optional local Spark stack (needed for PySpark execution and validation):
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```sh
+docker compose up -d   # provides the Envoy grpc-web proxy + Spark Connect
 ```
+
+Quality checks:
+
+```sh
+npm run build      # TypeScript + production build
+npm run lint       # ESLint
+git diff --check   # whitespace check
+```
+
+## PySpark requirements
+
+PySpark runs against a Spark Connect endpoint through a same-origin Envoy
+grpc-web proxy:
+
+- Browser bundle requests `sc://localhost:8081/;transport=grpcweb` and loads
+  the worker from `/worker/pyspark-test-worker.js`.
+- `SharedArrayBuffer` requires cross-origin isolation: the dev server already
+  sends `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: credentialless` (see `vite.config.ts`).
+  **Production hosting must send equivalent headers**, otherwise PySpark boot
+  fails with an explanatory error and everything else keeps working.
+- Without a reachable Spark stack, PySpark questions show a clear execution
+  error after the documented 120-second timeout; SQL, learning, practice and
+  admin flows are unaffected.
+
+## Deployment (static hosting)
+
+The production build (`dist/`, produced by `npm run build`) is a static
+site with client-side routing:
+
+- Serve `dist/` from any static host. Configure an **SPA fallback** so every
+  unknown path serves `index.html` (required for deep links and refresh on
+  routes such as `/learn/sql-foundations` or `/question/<id>`).
+- Send the COOP/COEP headers above on all responses (required for PySpark;
+  harmless otherwise).
+- The app assumes it is served from the domain root (`/`). For sub-path
+  hosting (e.g. `https://<user>.github.io/<repo>/`), set Vite `base` to the
+  sub-path and rebuild.
+- PySpark in production needs the Envoy proxy reachable at the configured
+  same-origin endpoint; SQL/PGlite needs no server at all (WASM assets ship
+  in `dist/assets`).
+- No environment variables or secrets are required. Nothing is deployed
+  automatically by this repository.
+
+## Routes
+
+| Route | Page |
+| --- | --- |
+| `/` | Questions discovery |
+| `/question/:questionId` | Question workspace |
+| `/practice` | Active practice / interview session |
+| `/practice/history/:sessionId` | Historical session review |
+| `/learn` | Learning home |
+| `/learn/:pathId` | Learning path detail |
+| `/learn/topic/:topicId` | Topic explorer |
+| `/interview` | Interview setup |
+| `/progress` | Progress + practice analytics |
+| `/admin`, `/admin/questions` | Admin + Question Management |
+| `/admin/preview` | Admin question preview |
+| `/pyspark-test` | PySpark engine diagnostics |
+| any other path | Not-found page |
+
+## Browser storage keys
+
+| Key | Store | Contents |
+| --- | --- | --- |
+| `queryvanta-admin-questions` | localStorage | Admin-managed questions |
+| `queryvanta-solved-questions` | localStorage | Solved question IDs |
+| `queryvanta-bookmarked-questions` | localStorage | Bookmarked question IDs |
+| `queryvanta-practice-history` | localStorage | Finished sessions (max 20) |
+| `queryvanta-question-attempts` | localStorage | Execution attempts (max 10/question) |
+| `queryvanta-practice-session` | sessionStorage | Active session (incl. interview deadline) |
+
+All readers tolerate missing or malformed data and fall back to safe
+defaults without touching unrelated keys.

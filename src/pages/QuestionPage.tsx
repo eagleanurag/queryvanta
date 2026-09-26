@@ -570,6 +570,12 @@ function QuestionPage({
   const databaseRef =
     useRef<PGlite | null>(null);
 
+  // Guards async SQL execution against stale
+  // completion: navigating questions (or unmounting)
+  // mid-query must not paint rows, errors or attempts
+  // onto the next question.
+  const execRef = useRef(0);
+
   const [isCopied, setIsCopied] = useState(false);
 
   const copyTimeoutRef = useRef<number | null>(null);
@@ -593,6 +599,8 @@ function QuestionPage({
           solutionCopyTimeoutRef.current,
         );
       }
+
+      execRef.current += 1;
     };
   }, []);
 
@@ -604,6 +612,8 @@ function QuestionPage({
   }, []);
 
   useEffect(() => {
+    execRef.current += 1;
+
     setSql(
       question?.starterCode ??
         "-- Write your solution here",
@@ -733,6 +743,7 @@ function QuestionPage({
     setValidationMessage("");
     setIsCorrect(null);
 
+    const execId = execRef.current;
     const startTime = performance.now();
 
     try {
@@ -740,6 +751,13 @@ function QuestionPage({
         await db.query<Record<string, unknown>>(
           sql,
         );
+
+      if (
+        execRef.current !== execId ||
+        databaseRef.current !== db
+      ) {
+        return;
+      }
 
       const elapsed =
         performance.now() - startTime;
@@ -790,6 +808,13 @@ function QuestionPage({
         );
       }
     } catch (err) {
+      if (
+        execRef.current !== execId ||
+        databaseRef.current !== db
+      ) {
+        return;
+      }
+
       const elapsed =
         performance.now() - startTime;
 
@@ -1531,6 +1556,11 @@ function QuestionPage({
               <div className="p-5">
                 <textarea
                   value={sql}
+                  aria-label={
+                    isPySpark
+                      ? "PySpark editor"
+                      : "SQL editor"
+                  }
                   onChange={(event) =>
                     setSql(event.target.value)
                   }
@@ -1668,6 +1698,7 @@ function QuestionPage({
                 )}
                     {executionStatus === "success" && (
                       <div
+                        role="status"
                     className={`mt-4 rounded-lg border px-4 py-3 ${
                       isCorrect
                         ? "border-emerald-200 bg-emerald-50"
@@ -1739,7 +1770,10 @@ function QuestionPage({
                 )}
 
                 {executionStatus === "error" && (
-                  <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4">
+                  <div
+                    role="alert"
+                    className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4"
+                  >
                     <div className="flex items-center gap-2">
                       <XCircle
                         size={16}

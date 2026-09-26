@@ -27,3 +27,13 @@ body,
 body {
   min-height: 100vh;
 }
+
+/* Visible keyboard focus across the app.
+   Tailwind's `outline-none` is used on editors
+   and dialogs, so restore an explicit ring for
+   keyboard users without changing mouse UX. */
+:focus-visible {
+  outline: 2px solid #4b5563;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
