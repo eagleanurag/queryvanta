@@ -121,10 +121,50 @@ function Write-JsonFileAtomic {
     }
 }
 
+# The state schema this controller writes. Version 1 is the original roadmap
+# state; version 2 adds the power-loss resilience fields. Bumping the version is
+# additive: every version 1 field keeps its meaning, so a version 1 file stays
+# readable and a version 2 file still contains everything version 1 had.
+$script:CurrentStateSchemaVersion = 2
+
+# Every field the controller may read or write, with the value used when a state
+# file that predates the field is loaded. Ordered so a rebuilt state file reads
+# in a stable order.
+$script:StateFieldDefaults = [ordered]@{
+    schemaVersion            = $script:CurrentStateSchemaVersion
+    project                  = 'queryvanta'
+    branch                   = 'main'
+    currentTaskId            = $null
+    currentAttempt           = 0
+    status                   = 'idle'
+    lastStartedAt            = $null
+    lastFinishedAt           = $null
+    lastExitCode             = $null
+    lastOpenCodeSessionId    = $null
+    lastResult               = $null
+    completedTaskIds         = @()
+    failedTaskIds            = @()
+    retryCount               = 0
+    lastError                = $null
+    lastLogFile              = $null
+    lastVerification         = $null
+    baselineHead             = $null
+    updatedAt                = $null
+    # --- power-loss resilience (schemaVersion 2) --------------------------
+    controllerRunId          = $null
+    taskCheckpoint           = $null
+    taskCheckpointAt         = $null
+    resumeMode               = $null
+    interruptedAt            = $null
+    interruptionReason       = $null
+    durableOpenCodeSessionId = $null
+    recoveryCount            = 0
+}
+
 function New-AutomationState {
     param([string]$Project = 'queryvanta', [string]$Branch = 'main')
     return [pscustomobject]@{
-        schemaVersion        = 1
+        schemaVersion        = $script:CurrentStateSchemaVersion
         project              = $Project
         currentTaskId        = $null
         currentAttempt       = 0
@@ -145,9 +185,10 @@ function New-AutomationState {
         updatedAt            = $null
 
         # --- power-loss resilience (schemaVersion 2, additive) ---------------
-        # These are all optional. A state file written by schemaVersion 1 is
-        # read as-is and every field below defaults to null, so an old state
-        # file never becomes unreadable.
+        # These are all optional in an older state file. A file written by
+        # schemaVersion 1 is read as-is by Update-AutomationStateSchema, which
+        # adds any field it is missing, so an old state file never becomes
+        # unreadable and never becomes unwritable either.
         controllerRunId      = $null
         taskCheckpoint       = $null
         taskCheckpointAt     = $null
@@ -157,6 +198,61 @@ function New-AutomationState {
         durableOpenCodeSessionId = $null
         recoveryCount        = 0
     }
+}
+
+function Update-AutomationStateSchema {
+    <#
+        Guarantees a state object carries every field the current controller
+        reads or writes, whatever version it was written by.
+
+        This exists because of a real, observed failure. PowerShell 5.1 cannot
+        assign a property that does not exist on a PSCustomObject; assigning the
+        checkpoint field directly on such an object throws
+
+            Exception setting "taskCheckpoint":
+            The property 'taskCheckpoint' cannot be found on this object.
+
+        so a state file written before the resilience fields existed could be
+        READ (Get-StateProperty returns a default) but could never be WRITTEN
+        again: every checkpoint update died on that assignment. The live 4.2A
+        state was exactly such a schemaVersion 1 file.
+
+        Rules, so this can never become a silent data loss:
+          * strictly additive - a field that already exists is never
+            overwritten, so normalizing cannot change a recorded fact. A
+            durable session id, a completed list and an attempt number are
+            therefore preserved byte for byte;
+          * idempotent - running it again changes nothing, which is what makes
+            repeated operator recovery safe;
+          * a schemaVersion newer than this controller's is left alone, rather
+            than downgraded by an older controller.
+    #>
+    param($State, [string]$Project = 'queryvanta', [string]$Branch = 'main')
+
+    if ($null -eq $State) { return (New-AutomationState -Project $Project -Branch $Branch) }
+
+    $existing = @($State.PSObject.Properties.Name)
+
+    foreach ($field in @($script:StateFieldDefaults.Keys)) {
+        if ($existing -contains $field) { continue }
+
+        $default = $script:StateFieldDefaults[$field]
+        if ($field -eq 'project') { $default = $Project }
+        if ($field -eq 'branch') { $default = $Branch }
+
+        Add-AutomationProperty -Object $State -Name $field -Value $default
+    }
+
+    # Raise the recorded version, but never lower it: a state written by a NEWER
+    # controller keeps its own version and its own unknown fields.
+    $recorded = 1
+    try { $recorded = [int](Get-StateProperty -State $State -Name 'schemaVersion' -Default 1) } catch { $recorded = 1 }
+    if ($recorded -lt 1) { $recorded = 1 }
+    if ($recorded -lt $script:CurrentStateSchemaVersion) {
+        Add-AutomationProperty -Object $State -Name 'schemaVersion' -Value $script:CurrentStateSchemaVersion
+    }
+
+    return $State
 }
 
 function Get-StateProperty {
@@ -190,8 +286,10 @@ function Set-StateProperty {
 function Read-State {
     $paths = Get-AutomationPaths
     if (-not (Test-Path $paths.State)) { return (New-AutomationState) }
+
+    $state = $null
     try {
-        return (Read-JsonFile $paths.State)
+        $state = Read-JsonFile $paths.State
     }
     catch {
         # A corrupt state file must not silently restart the roadmap. Rename it
@@ -201,12 +299,23 @@ function Read-State {
         Write-AutomationLog "state.json was unreadable; moved to $backup and rebuilt." 'WARN'
         return (New-AutomationState)
     }
+
+    # Normalization happens OUTSIDE the corrupt-file guard on purpose: a state
+    # file that parses cleanly but predates a field is not corrupt, and must
+    # never be moved aside. Every caller therefore receives an object on which
+    # plain `$State.field = value` is safe, which is what removes the whole
+    # class of "property cannot be found" failures.
+    return (Update-AutomationStateSchema -State $state)
 }
 
 function Save-State {
     param([Parameter(Mandatory = $true)]$State)
-    $State.updatedAt = (Get-IsoTimestamp)
-    Add-AutomationProperty -Object $State -Name 'updatedAt' -Value (Get-IsoTimestamp)
+
+    # Backward compatible write: a state object from an older schema is brought
+    # up to the current schema in memory first, so persisting it can never fail
+    # on a field it happens not to have.
+    $State = Update-AutomationStateSchema -State $State
+    Set-StateProperty -Object $State -Name 'updatedAt' -Value (Get-IsoTimestamp) | Out-Null
     Write-JsonFileAtomic -Path (Get-AutomationPaths).State -Value $State -Depth 12
 }
 
@@ -844,6 +953,16 @@ function Save-Checkpoint {
         Persist a controller stage marker before and after major transitions.
         The write is atomic, so a power loss during a checkpoint can never leave
         a half-written state file.
+
+        The two checkpoint fields are written through Set-StateProperty, never
+        by direct property assignment. A state file that predates them is a
+        normal, supported input: a schemaVersion 1 controller wrote no
+        taskCheckpoint field at all, and assigning that field directly on such
+        an object throws "The property 'taskCheckpoint' cannot be found on this
+        object" under Set-StrictMode, which is what made the live 4.2A recovery
+        fail. The schema is also brought up to date first, so the state file
+        gains every resilience field it is missing as part of the checkpoint
+        write.
     #>
     param(
         [Parameter(Mandatory = $true)]$State,
@@ -854,8 +973,9 @@ function Save-Checkpoint {
         throw "Unknown checkpoint '$Name'. Valid: $($script:CheckpointNames -join ', ')"
     }
 
-    $State.taskCheckpoint = $Name
-    $State.taskCheckpointAt = (Get-IsoTimestamp)
+    $State = Update-AutomationStateSchema -State $State
+    Set-StateProperty -Object $State -Name 'taskCheckpoint' -Value $Name | Out-Null
+    Set-StateProperty -Object $State -Name 'taskCheckpointAt' -Value (Get-IsoTimestamp) | Out-Null
     Save-State -State $State
     Write-AutomationLog "checkpoint: $Name"
     return $Name
@@ -863,17 +983,58 @@ function Save-Checkpoint {
 
 # Statuses that mean "a controller was in the middle of something" when the
 # process is no longer running.
-$script:InFlightStatuses = @('running', 'recovering', 'verifying', 'selected', 'preflight_complete', 'opencode_started', 'result_parsed', 'verification_started')
+#
+# 'interrupted' is included deliberately. It is the status operator recovery
+# leaves behind, and it must still be recognised as in flight on the next
+# controller start, so the task stays at the head of the queue and is resumed
+# with its durable session. Without it, a recovered state would be treated as a
+# quiet idle start and could be overtaken by the next roadmap task.
+$script:InFlightStatuses = @('running', 'interrupted', 'recovering', 'verifying', 'selected', 'preflight_complete', 'opencode_started', 'result_parsed', 'verification_started')
+
+function Test-LockOwnedBySelf {
+    <#
+        True when the lock file was taken by THIS process.
+
+        The lock records the owning pid and machine. The current process is not
+        a competing writer to itself, and treating it as one hides a crash from
+        the very process that has to detect it: the runner takes the lock for
+        its whole lifetime and then asks whether a controller is active, so
+        without this check it always answers "yes, the controller is still
+        running", classifies its own in-flight status as
+        'controller-still-running', and resumes nothing.
+    #>
+    param($Lock)
+
+    if ($null -eq $Lock) { return $false }
+    if ($Lock.PSObject.Properties.Name -notcontains 'pid') { return $false }
+    if ($Lock.PSObject.Properties.Name -notcontains 'machine') { return $false }
+    if ($Lock.machine -ne [System.Environment]::MachineName) { return $false }
+
+    try { return ([int]$Lock.pid -eq $PID) }
+    catch { return $false }
+}
 
 function Test-ControllerActive {
     <#
-        Is a controller process alive right now? The lock file is the single
-        source of truth, because the runner holds it for its whole lifetime.
+        Is ANOTHER controller process alive right now? The lock file is the
+        single source of truth, because the runner holds it for its whole
+        lifetime.
+
+        A lock owned by the current process is explicitly NOT an active
+        controller. This matters only inside the controller itself, which
+        holds the lock before it inspects state; for recover-task.ps1 and
+        recovery-launcher.ps1, which never take the lock, the lock can only
+        ever belong to somebody else and the answer is unchanged.
+
+        The single-instance guarantee is unaffected: the real protection
+        against two writers is exclusive lock CREATION in Enter-RunnerLock,
+        which a second process still fails.
     #>
     param([int]$MaxAgeHours = 12)
 
     $lock = Get-LockState
     if ($null -eq $lock) { return $false }
+    if (Test-LockOwnedBySelf -Lock $lock) { return $false }
     return -not (Test-LockStale -Lock $lock -MaxAgeHours $MaxAgeHours)
 }
 
@@ -894,6 +1055,13 @@ function Get-InterruptedRun {
           D) status blocked WITH lastResult = 'BLOCKED' -> genuine agent
              BLOCKED, must stay blocked
           E) nothing in flight           -> null
+
+        The session-id condition in rule C is what keeps a genuine BLOCKED from
+        being silently converted into recoverable state. A pre-flight guard
+        trip, for example, writes status 'blocked' with no result, no
+        verification and NO session id, because the agent never ran; treating
+        that as an interruption would re-enter the same guard failure forever.
+        With no session to resume and no result to trust, only rule D is safe.
     #>
     param($State, [int]$MaxAgeHours = 12)
 
@@ -943,12 +1111,14 @@ function Get-InterruptedRun {
     }
 
     # Rule C vs D: a blocked status is only an interruption artifact when no
-    # real result was ever produced.
+    # real result was ever produced AND a session exists that was left in
+    # flight. Every other blocked state is a genuine block and stays blocked.
     if ($status -eq 'blocked') {
         $hasRealResult = ($null -ne $lastResult) -and ("$lastResult" -ne '')
         $hasVerification = @(Get-StateProperty -State $State -Name 'lastVerification' -Default @()).Count -gt 0
+        $hasSession = ($null -ne $sessionId) -and ("$([string]$sessionId)".Trim() -ne '')
 
-        if (-not $hasRealResult -and -not $hasVerification) {
+        if (-not $hasRealResult -and -not $hasVerification -and $hasSession) {
             return [pscustomobject]@{
                 IsInterrupted  = $true
                 Reason         = 'blocked-without-result-interruption-artifact'
@@ -962,6 +1132,9 @@ function Get-InterruptedRun {
         }
 
         # Rule D: a real BLOCKED result stays blocked. Never silently retried.
+        # A blocked status with no session id is also treated as genuine: the
+        # agent never produced a resumable session, so there is nothing to
+        # recover and re-running it would be an unbounded blind retry.
         return [pscustomobject]@{
             IsInterrupted  = $false
             Reason         = 'genuine-blocked'

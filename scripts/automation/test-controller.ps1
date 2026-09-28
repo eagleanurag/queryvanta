@@ -27,6 +27,18 @@
      19  forbidden-operation detection
      20  destructive-git detection
      21  no controller source file leaks into a tsc project
+     22  backward-compatible state WRITES: a schemaVersion 1 state gains every
+         resilience field, survives Save-Checkpoint and Save-State, and is never
+         downgraded or overwritten (the live 4.2A recovery failure)
+     23  genuine BLOCKED is not converted into recoverable state, whether it
+         carries a result, verification output, or no session at all
+     24  operator recovery end to end in a child process, without OpenCode: the
+         task, attempt and durable session survive, nothing is marked complete,
+         the working tree is untouched, repeats are idempotent, and completed,
+         genuine-blocked, mismatched, unknown and locked cases are all refused
+     25  lock ownership: a lock held by THIS process is not an active
+         controller (so the runner can still detect its own interrupted run),
+         while a lock held by a different live process is
 
     All temporary state is written under .automation/logs/self-test and removed
     on success, so a green run leaves the repository exactly as it found it.
@@ -127,7 +139,7 @@ Assert-True 'state file created' (Test-Path $statePath)
 Assert-True 'atomic write left no .tmp file' (-not (Test-Path "$statePath.tmp"))
 
 $reloaded = Read-JsonFile $statePath
-Assert-Equal 'state round-trips schemaVersion' 1 $reloaded.schemaVersion
+Assert-Equal 'state round-trips schemaVersion' 2 $reloaded.schemaVersion
 Assert-Equal 'state round-trips project' 'selftest' $reloaded.project
 Assert-Equal 'initial currentTaskId is null' '' "$($reloaded.currentTaskId)"
 
@@ -142,6 +154,7 @@ foreach ($f in $requiredFields) {
     if ($reloaded.PSObject.Properties.Name -notcontains $f) { $missing += $f }
 }
 Assert-True 'state contains every required field' ($missing.Count -eq 0) ($missing -join ', ')
+Assert-Equal 'a new state records the current schema version' 2 $reloaded.schemaVersion
 
 # The previous state must survive a write that cannot complete. Simulate a
 # failed serialization by passing a value that cannot be converted.
@@ -305,6 +318,72 @@ $afterReclaim = Get-LockState
 Assert-Equal 'reclaimed lock now belongs to this process' $PID ([int]$afterReclaim.pid)
 Exit-RunnerLock
 Assert-True 'lock released after reclaim test' (-not (Test-Path $paths.Lock))
+
+# --- who counts as "a controller is active" --------------------------------
+# The runner holds the lock for its whole lifetime and then asks whether a
+# controller is active. Its OWN lock must not answer "yes", or the runner
+# classifies its own in-flight status as 'controller-still-running' and resumes
+# nothing. A lock owned by a DIFFERENT live process must still answer "yes".
+if (Test-Path $paths.Lock) { Remove-Item $paths.Lock -Force }
+
+Assert-True 'the lock is acquired for the self-detection test' (Enter-RunnerLock -MaxAgeHours 12)
+$ownLock = Get-LockState
+Assert-True 'our own lock is recognised as ours' (Test-LockOwnedBySelf -Lock $ownLock)
+Assert-True 'our own lock is NOT an active controller' ((Test-ControllerActive -MaxAgeHours 12) -eq $false)
+Assert-True 'our own lock is still not stale' ((Test-LockStale -Lock $ownLock -MaxAgeHours 12) -eq $false)
+Assert-True 'a second acquisition is still refused while we hold it' ((Enter-RunnerLock -MaxAgeHours 12) -eq $false)
+Exit-RunnerLock
+Assert-True 'lock released after the self-detection test' (-not (Test-Path $paths.Lock))
+
+# A lock from a genuinely different, genuinely alive process must still be
+# reported as an active controller. A real sleeper process is used rather than a
+# fabricated pid, because a fabricated dead pid would be stale, and staleness is
+# a different question from ownership.
+$sleeper = $null
+try { $sleeper = Start-Process -FilePath 'ping.exe' -ArgumentList '-n', '40', '127.0.0.1' -PassThru -WindowStyle Hidden -ErrorAction Stop } catch { $sleeper = $null }
+
+if ($null -eq $sleeper) {
+    # No process could be started on this host; fall back to the parent process,
+    # which is alive by definition and is never this test process.
+    $parentId = 0
+    try { $parentId = [int](Get-CimInstance Win32_Process -Filter "ProcessId=$PID").ParentProcessId } catch { $parentId = 0 }
+    Assert-True 'a live process other than this one is available for the ownership test' ($parentId -gt 0 -and $parentId -ne $PID)
+    $otherLive = [pscustomobject]@{
+        pid        = $parentId
+        machine    = [System.Environment]::MachineName
+        acquiredAt = (Get-IsoTimestamp)
+    }
+    Write-JsonFileAtomic -Path $paths.Lock -Value $otherLive -Depth 6
+    Assert-True 'another live process on this machine IS an active controller' ((Test-ControllerActive -MaxAgeHours 12) -eq $true)
+    Assert-True 'another live process is not our own lock' ((Test-LockOwnedBySelf -Lock (Get-LockState)) -eq $false)
+    Remove-Item $paths.Lock -Force -ErrorAction SilentlyContinue
+}
+else {
+    Assert-True 'the sleeper process is alive' (Test-ProcessAlive -ProcessId $sleeper.Id)
+    $otherLive = [pscustomobject]@{
+        pid        = $sleeper.Id
+        machine    = [System.Environment]::MachineName
+        acquiredAt = (Get-IsoTimestamp)
+    }
+    Write-JsonFileAtomic -Path $paths.Lock -Value $otherLive -Depth 6
+    Assert-True 'another live process on this machine IS an active controller' ((Test-ControllerActive -MaxAgeHours 12) -eq $true)
+    Assert-True 'another live process is not our own lock' ((Test-LockOwnedBySelf -Lock (Get-LockState)) -eq $false)
+    Assert-True 'another live process also cannot be reclaimed' ((Enter-RunnerLock -MaxAgeHours 12) -eq $false)
+
+    # Once that process is gone the lock is stale, and reclaimable again.
+    Stop-Process -Id $sleeper.Id -Force -ErrorAction SilentlyContinue
+    $sleeper.WaitForExit(10000) | Out-Null
+    Remove-Item $paths.Lock -Force -ErrorAction SilentlyContinue
+    Assert-True 'a dead owner is no longer an active controller' ((Test-ControllerActive -MaxAgeHours 12) -eq $false)
+    Assert-True 'a dead owner is reclaimable' (Enter-RunnerLock -MaxAgeHours 12)
+    Exit-RunnerLock
+}
+
+# A lock recorded on another machine is never ours, whatever pid it names.
+Assert-True 'a remote lock is not our own lock' ((Test-LockOwnedBySelf -Lock $freshRemote) -eq $false)
+Assert-True 'a lock with no pid is not our own lock' ((Test-LockOwnedBySelf -Lock ([pscustomobject]@{ machine = [System.Environment]::MachineName })) -eq $false)
+Assert-True 'a null lock is not our own lock' ((Test-LockOwnedBySelf -Lock $null) -eq $false)
+if (Test-Path $paths.Lock) { Remove-Item $paths.Lock -Force -ErrorAction SilentlyContinue }
 
 # ---------------------------------------------------------------------------
 Write-Host ''
@@ -698,6 +777,97 @@ $cpThrew = $false
 try { Save-Checkpoint -State $cp -Name 'not-a-real-checkpoint' | Out-Null } catch { $cpThrew = $true }
 Assert-True 'an unknown checkpoint name is rejected' $cpThrew
 
+# --- 3b. backward-compatible WRITES (the observed live failure) ------------
+# Regression test for the real failure seen on the live 4.2A state: that file was
+# written by a schemaVersion 1 controller, so it had no taskCheckpoint member,
+# and `$State.taskCheckpoint = $Name` on it throws
+#   "The property 'taskCheckpoint' cannot be found on this object"
+# which aborted recover-task.ps1 -RecoverInterrupted before it could write.
+$legacyArtifact = [pscustomobject]@{
+    schemaVersion         = 1
+    project               = 'queryvanta'
+    currentTaskId         = '4.2A'
+    currentAttempt        = 1
+    status                = 'blocked'
+    lastStartedAt         = '2026-09-28T17:51:54Z'
+    lastFinishedAt        = '2026-09-28T20:04:22Z'
+    lastExitCode          = 0
+    lastOpenCodeSessionId = 'ses_f16dae178ffe8SBieuLYtoSEyy'
+    lastResult            = $null
+    completedTaskIds      = @()
+    failedTaskIds         = @('4.2A')
+    retryCount            = 0
+    lastError             = 'task 4.2A blocked; controller stopped'
+    lastLogFile           = 'C:\nonexistent\opencode-4.2A.log'
+    lastVerification      = $null
+    branch                = 'main'
+    baselineHead          = '2cf3d57'
+    updatedAt             = '2026-09-28T20:04:22Z'
+}
+
+# The schema is brought up to date in memory, additively.
+$upgraded = Update-AutomationStateSchema -State $legacyArtifact
+$resilienceFields = @('controllerRunId', 'taskCheckpoint', 'taskCheckpointAt', 'resumeMode',
+    'interruptedAt', 'interruptionReason', 'durableOpenCodeSessionId', 'recoveryCount')
+$stillMissing = @()
+foreach ($f in $resilienceFields) {
+    if ($upgraded.PSObject.Properties.Name -notcontains $f) { $stillMissing += $f }
+}
+Assert-True 'an old state gains every resilience field' ($stillMissing.Count -eq 0) ($stillMissing -join ', ')
+Assert-Equal 'an old state is raised to the current schema' 2 $upgraded.schemaVersion
+Assert-True 'normalizing never overwrites a recorded field' (
+    ($upgraded.currentTaskId -eq '4.2A') -and
+    ($upgraded.currentAttempt -eq 1) -and
+    ($upgraded.lastOpenCodeSessionId -eq 'ses_f16dae178ffe8SBieuLYtoSEyy') -and
+    ($upgraded.lastError -eq 'task 4.2A blocked; controller stopped'))
+
+# Idempotent: a second pass changes nothing at all.
+$afterFirst = ConvertTo-CompactJson -Value $upgraded
+$twice = Update-AutomationStateSchema -State $upgraded
+Assert-Equal 'normalizing twice is a no-op' $afterFirst (ConvertTo-CompactJson -Value $twice)
+Assert-Equal 'recovery count is not invented' 0 (Get-StateProperty -State $twice -Name 'recoveryCount' -Default 0)
+
+# A newer state written by a future controller is never downgraded, and its
+# unknown fields survive.
+$future = [pscustomobject]@{ schemaVersion = 99; project = 'queryvanta'; somethingNewer = 'keep-me' }
+$keptFuture = Update-AutomationStateSchema -State $future
+Assert-Equal 'a newer schema version is not downgraded' 99 $keptFuture.schemaVersion
+Assert-Equal 'an unknown future field is preserved' 'keep-me' $keptFuture.somethingNewer
+
+# THE BUG: a checkpoint written against a raw, un-normalized schemaVersion 1
+# state object must not throw, must add the missing fields, and must persist.
+Write-JsonFileAtomic -Path $paths.State -Value $legacyArtifact -Depth 12
+$legacyCpThrew = $false
+try { Save-Checkpoint -State $legacyArtifact -Name 'selected' | Out-Null } catch { $legacyCpThrew = $true }
+Assert-True 'Save-Checkpoint on a schemaVersion 1 state does not throw' (-not $legacyCpThrew)
+Assert-Equal 'the checkpoint is recorded on an old state' 'selected' $legacyArtifact.taskCheckpoint
+Assert-True 'the checkpoint timestamp is written on an old state' ("$($legacyArtifact.taskCheckpointAt)" -match '^\d{4}-\d{2}-\d{2}T')
+$legacyPersisted = Read-JsonFile $paths.State
+Assert-Equal 'the checkpoint reached disk from an old state' 'selected' $legacyPersisted.taskCheckpoint
+Assert-Equal 'the durable session id survived the old-state write' 'ses_f16dae178ffe8SBieuLYtoSEyy' $legacyPersisted.lastOpenCodeSessionId
+
+# Save-State had the same defect: it assigned updatedAt directly.
+$legacySaveThrew = $false
+try { Save-State -State $legacyArtifact } catch { $legacySaveThrew = $true }
+Assert-True 'Save-State on a schemaVersion 1 state does not throw' (-not $legacySaveThrew)
+
+# Read-State normalizes what it returns, so every caller gets an object that is
+# safe to assign to directly.
+Write-JsonFileAtomic -Path $paths.State -Value $legacyArtifact -Depth 12
+$readNormalized = Read-State
+$readMissing = @()
+foreach ($f in $resilienceFields) {
+    if ($readNormalized.PSObject.Properties.Name -notcontains $f) { $readMissing += $f }
+}
+Assert-True 'Read-State returns a state with every resilience field' ($readMissing.Count -eq 0) ($readMissing -join ', ')
+Assert-Equal 'Read-State preserves the task of an old state' '4.2A' $readNormalized.currentTaskId
+Assert-Equal 'Read-State preserves the attempt of an old state' 1 $readNormalized.currentAttempt
+Assert-Equal 'Read-State preserves the session of an old state' 'ses_f16dae178ffe8SBieuLYtoSEyy' $readNormalized.lastOpenCodeSessionId
+Assert-Equal 'Read-State does not mark anything complete on an old state' 0 @($readNormalized.completedTaskIds).Count
+$readAssignThrew = $false
+try { $readNormalized.status = 'interrupted' } catch { $readAssignThrew = $true }
+Assert-True 'a state from Read-State can be assigned to directly' (-not $readAssignThrew)
+
 # required checkpoint vocabulary
 $requiredCp = @('selected', 'preflight_complete', 'opencode_started', 'opencode_finished',
     'result_parsed', 'verification_started', 'verification_passed', 'task_completed', 'controller_stopped')
@@ -718,12 +888,27 @@ Assert-Equal 'interrupted reason is the in-flight status' 'status-in-flight-with
 Assert-Equal 'interrupted task id is preserved' '4.2A' $intRun.TaskId
 Assert-Equal 'interrupted attempt is preserved' 2 $intRun.Attempt
 
-foreach ($s in @('recovering', 'verifying', 'opencode_started', 'result_parsed')) {
+foreach ($s in @('interrupted', 'recovering', 'verifying', 'opencode_started', 'result_parsed')) {
     $t = New-AutomationState
     $t.status = $s
     $t.currentTaskId = '4.2A'
     Assert-True "status '$s' is treated as in-flight" ((Get-InterruptedRun -State $t).IsInterrupted -eq $true)
 }
+
+# The status operator recovery leaves behind must still be resumable, so the
+# task keeps its place at the head of the queue instead of being overtaken by
+# the next roadmap task.
+$recovered = New-AutomationState
+$recovered.status = 'interrupted'
+$recovered.currentTaskId = '4.2A'
+$recovered.currentAttempt = 1
+Set-StateProperty -Object $recovered -Name 'durableOpenCodeSessionId' -Value 'ses_f16dae178ffe8SBieuLYtoSEyy' | Out-Null
+Set-StateProperty -Object $recovered -Name 'recoveryCount' -Value 1 | Out-Null
+$intRecovered = Get-InterruptedRun -State $recovered
+Assert-True 'a recovered state is still detected as interrupted' ($intRecovered.IsInterrupted -eq $true)
+Assert-Equal 'a recovered state is NOT genuine blocked' 'False' "$($intRecovered.GenuineBlocked)"
+Assert-Equal 'a recovered state resumes its durable session' 'session-resume' (Get-ResumePlan -Interrupted $intRecovered)
+Assert-Equal 'a recovered state keeps its attempt' 1 $intRecovered.Attempt
 
 # --- 5. genuine BLOCKED is preserved ---------------------------------------
 $genuine = New-AutomationState
@@ -753,6 +938,35 @@ Assert-True 'blocked-without-result is an interruption artifact' ($intArtifact.I
 Assert-Equal 'the artifact reason is recorded' 'blocked-without-result-interruption-artifact' $intArtifact.Reason
 Assert-True 'the artifact is NOT genuine blocked' ($intArtifact.GenuineBlocked -eq $false)
 Assert-Equal 'the artifact resume plan is session-resume' 'session-resume' (Get-ResumePlan -Interrupted $intArtifact)
+
+# A blocked status with no result but ALSO no session id is NOT an artifact.
+# This is the pre-flight guard case: the agent never ran, so there is nothing to
+# resume. Calling it recoverable would re-enter the same failing guard on every
+# controller start, turning a genuine block into an infinite blind retry.
+$noSessionBlock = New-AutomationState
+$noSessionBlock.status = 'blocked'
+$noSessionBlock.currentTaskId = '4.2A'
+$noSessionBlock.lastResult = $null
+Set-StateProperty -Object $noSessionBlock -Name 'lastVerification' -Value @() | Out-Null
+Set-StateProperty -Object $noSessionBlock -Name 'lastOpenCodeSessionId' -Value $null | Out-Null
+Set-StateProperty -Object $noSessionBlock -Name 'durableOpenCodeSessionId' -Value $null | Out-Null
+$intNoSession = Get-InterruptedRun -State $noSessionBlock
+Assert-True 'blocked with no session is not an interruption' ($intNoSession.IsInterrupted -eq $false)
+Assert-True 'blocked with no session stays genuinely blocked' ($intNoSession.GenuineBlocked -eq $true)
+Assert-Equal 'blocked with no session is never auto-resumed' 'none' (Get-ResumePlan -Interrupted $intNoSession)
+
+# A blocked state that already has verification output is a real block too.
+$verifiedBlock = New-AutomationState
+$verifiedBlock.status = 'blocked'
+$verifiedBlock.currentTaskId = '4.2A'
+$verifiedBlock.lastResult = $null
+Set-StateProperty -Object $verifiedBlock -Name 'lastVerification' -Value @(
+    [pscustomobject]@{ name = 'tsc'; command = 'npx tsc -b --force'; exitCode = 1 }
+) | Out-Null
+Set-StateProperty -Object $verifiedBlock -Name 'lastOpenCodeSessionId' -Value 'ses_verified_block' | Out-Null
+$intVerified = Get-InterruptedRun -State $verifiedBlock
+Assert-True 'blocked with verification output is not an interruption' ($intVerified.IsInterrupted -eq $false)
+Assert-True 'blocked with verification output stays blocked' ($intVerified.GenuineBlocked -eq $true)
 
 # A completed task must never be reported as interrupted, even if status is odd.
 $doneTask = New-AutomationState
@@ -846,12 +1060,204 @@ Assert-True 'recover-task requires a task id' ($recoverSrc -like '*RecoverInterr
 Assert-True 'recover-task refuses destructive git' ($recoverSrc -notmatch '(?m)^\s*(git reset --hard|git clean)')
 Assert-True 'recover-task never marks a task complete' ($recoverSrc -notmatch 'completedTaskIds\s*\+=')
 
+# Structural guard for the class of bug that broke live recovery. Direct
+# assignment to a state field is what throws on a state file that predates the
+# field, so the resilience writes must go through Set-StateProperty.
+$commonSrc = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Automation.Common.ps1'))
+Assert-True 'Save-Checkpoint does not assign taskCheckpoint directly' ($commonSrc -notmatch '\$State\.taskCheckpoint\s*=')
+Assert-True 'Save-Checkpoint does not assign taskCheckpointAt directly' ($commonSrc -notmatch '\$State\.taskCheckpointAt\s*=')
+Assert-True 'Save-State does not assign updatedAt directly' ($commonSrc -notmatch '\$State\.updatedAt\s*=')
+Assert-True 'recover-task does not assign state fields directly' ($recoverSrc -notmatch '(?m)^\s*\$state\.[A-Za-z]+\s*=')
+Assert-True 'the runner uses a tolerant session read for resume' (
+    ([System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'autonomous-runner.ps1'))) -like "*durableOpenCodeSessionId' -Default (Get-StateProperty*")
+
+# ---------------------------------------------------------------------------
+Write-Host ''
+Write-Host '14. operator recovery of an interrupted run (no OpenCode launched)'
+# ---------------------------------------------------------------------------
+
+# The -RecoverInterrupted path exits before any agent invocation, so running it
+# in a child process exercises the real script end to end without OpenCode and
+# without touching the application. The live state file is backed up and
+# restored around the whole run.
+$recoverScript = Join-Path $PSScriptRoot 'recover-task.ps1'
+Assert-True 'the recovery script exists' (Test-Path $recoverScript)
+
+function Invoke-OperatorRecovery {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    # A refused recovery writes its reason to stderr. Under
+    # $ErrorActionPreference = 'Stop' that native stderr becomes a TERMINATING
+    # error in this test, which would abort the suite instead of recording a
+    # failed assertion. Relax the preference for the duration of the call and
+    # assert on the exit code instead.
+    $previous = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $recoverScript @Arguments 2>&1 | Out-String
+        $code = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previous
+    }
+
+    return [pscustomobject]@{
+        ExitCode = $code
+        Output   = $output
+    }
+}
+
+# Never race a controller: the recovery script must refuse while one is live.
+if (Test-Path $paths.Lock) { Remove-Item $paths.Lock -Force -ErrorAction SilentlyContinue }
+
+$treeBefore = (@(Get-WorkingTreeSummary) -join "`n")
+
+# The exact live shape: a schemaVersion 1 interruption artifact.
+Write-JsonFileAtomic -Path $paths.State -Value $legacyArtifact -Depth 12
+
+$recovery1 = Invoke-OperatorRecovery -Arguments @('-TaskId', '4.2A', '-RecoverInterrupted')
+Assert-Equal 'operator recovery of the interrupted 4.2A run succeeds' 0 $recovery1.ExitCode
+if ($recovery1.ExitCode -ne 0) { Write-Host $recovery1.Output }
+
+$after1 = Read-JsonFile $paths.State
+Assert-Equal 'recovery leaves the task as 4.2A' '4.2A' $after1.currentTaskId
+Assert-Equal 'recovery leaves the recovery-ready status' 'interrupted' $after1.status
+Assert-Equal 'recovery keeps the attempt' 1 $after1.currentAttempt
+Assert-Equal 'recovery preserves the durable session id' 'ses_f16dae178ffe8SBieuLYtoSEyy' $after1.durableOpenCodeSessionId
+Assert-Equal 'recovery preserves the previous session id' 'ses_f16dae178ffe8SBieuLYtoSEyy' $after1.lastOpenCodeSessionId
+Assert-Equal 'recovery marks NO task complete' 0 @($after1.completedTaskIds).Count
+Assert-Equal 'recovery drops the interrupted task from failedTaskIds' 0 @($after1.failedTaskIds).Count
+Assert-Equal 'recovery clears the stale error' '' "$($after1.lastError)"
+Assert-Equal 'recovery clears the absent result' '' "$($after1.lastResult)"
+Assert-Equal 'recovery records the checkpoint' 'selected' $after1.taskCheckpoint
+Assert-True 'recovery records the interruption reason' ("$($after1.interruptionReason)" -eq 'operator-recovery-after-interrupted-run')
+Assert-Equal 'recovery counts itself once' 1 $after1.recoveryCount
+Assert-Equal 'recovery brings the state to the current schema' 2 $after1.schemaVersion
+Assert-True 'recovery keeps a timestamp' ("$($after1.updatedAt)" -match '^\d{4}-\d{2}-\d{2}T')
+Assert-Equal 'recovery does not touch the working tree' $treeBefore (@(Get-WorkingTreeSummary) -join "`n")
+
+# The recovered state must still be recognised as resumable, and 4.2A must
+# still be the task the controller would pick up next.
+$intAfterRecovery = Get-InterruptedRun -State (Read-State) -MaxAgeHours $config.lock.maxAgeHours
+Assert-True 'the recovered state is still detected as interrupted' ($intAfterRecovery.IsInterrupted -eq $true)
+Assert-Equal 'the recovered state is resumable by session' 'session-resume' (Get-ResumePlan -Interrupted $intAfterRecovery)
+Assert-Equal 'the next selected task is still 4.2A' '4.2A' (Select-NextTask -State (Read-State)).Id
+
+# The decisive case: the controller holds the lock for its whole lifetime and
+# then asks whether a controller is active. Its own lock must not suppress the
+# detection, because that is what produces the resume plan.
+if (Test-Path $paths.Lock) { Remove-Item $paths.Lock -Force -ErrorAction SilentlyContinue }
+Assert-True 'the controller lock is held for the self-lock test' (Enter-RunnerLock -MaxAgeHours 12)
+$intOwnLock = Get-InterruptedRun -State (Read-State) -MaxAgeHours $config.lock.maxAgeHours
+Assert-True 'holding the lock does NOT hide the interruption' ($intOwnLock.IsInterrupted -eq $true)
+Assert-Equal 'holding the lock is not reported as a competing controller' 'status-in-flight-without-controller' $intOwnLock.Reason
+Assert-True 'holding the lock keeps genuine blocked distinguishable' ($intOwnLock.GenuineBlocked -eq $false)
+Assert-Equal 'holding the lock still yields a session resume' 'session-resume' (Get-ResumePlan -Interrupted $intOwnLock)
+Assert-Equal 'the resume still targets the durable session' 'ses_f16dae178ffe8SBieuLYtoSEyy' $intOwnLock.SessionId
+Exit-RunnerLock
+
+# The same self-lock must not invent an interruption out of nothing.
+if (Test-Path $paths.Lock) { Remove-Item $paths.Lock -Force -ErrorAction SilentlyContinue }
+Assert-True 'the lock is held again for the quiet-state test' (Enter-RunnerLock -MaxAgeHours 12)
+$quiet = New-AutomationState
+$quiet.status = 'idle'
+Assert-True 'an idle state with the lock held is not an interruption' ($null -eq (Get-InterruptedRun -State $quiet))
+$genuineHeld = New-AutomationState
+$genuineHeld.status = 'blocked'
+$genuineHeld.currentTaskId = '4.2A'
+$genuineHeld.lastResult = 'BLOCKED'
+Set-StateProperty -Object $genuineHeld -Name 'lastOpenCodeSessionId' -Value 'ses_genuine' | Out-Null
+$intGenuineHeld = Get-InterruptedRun -State $genuineHeld
+Assert-True 'a genuine BLOCKED is still blocked while holding the lock' ($intGenuineHeld.GenuineBlocked -eq $true)
+Assert-Equal 'a genuine BLOCKED is still never resumed with the lock held' 'none' (Get-ResumePlan -Interrupted $intGenuineHeld)
+Exit-RunnerLock
+Assert-True 'the lock is released after the self-lock tests' (-not (Test-Path $paths.Lock))
+
+# --- idempotency: the same command run again must be safe ------------------
+$recovery2 = Invoke-OperatorRecovery -Arguments @('-TaskId', '4.2A', '-RecoverInterrupted')
+Assert-Equal 'repeating the recovery command succeeds' 0 $recovery2.ExitCode
+if ($recovery2.ExitCode -ne 0) { Write-Host $recovery2.Output }
+
+$after2 = Read-JsonFile $paths.State
+Assert-Equal 'a repeated recovery keeps the task' '4.2A' $after2.currentTaskId
+Assert-Equal 'a repeated recovery keeps the status' 'interrupted' $after2.status
+Assert-Equal 'a repeated recovery keeps the attempt' 1 $after2.currentAttempt
+Assert-Equal 'a repeated recovery keeps the durable session id' 'ses_f16dae178ffe8SBieuLYtoSEyy' $after2.durableOpenCodeSessionId
+Assert-Equal 'a repeated recovery marks NO task complete' 0 @($after2.completedTaskIds).Count
+Assert-Equal 'a repeated recovery only bumps the recovery count' 2 $after2.recoveryCount
+Assert-Equal 'a repeated recovery does not touch the working tree' $treeBefore (@(Get-WorkingTreeSummary) -join "`n")
+
+# --- a genuine BLOCKED must never be converted into recoverable state ------
+$genuineState = New-AutomationState
+$genuineState.status = 'blocked'
+$genuineState.currentTaskId = '4.2A'
+$genuineState.currentAttempt = 1
+$genuineState.lastResult = 'BLOCKED'
+$genuineState.lastError = 'task 4.2A blocked; controller stopped'
+$genuineState.failedTaskIds = @('4.2A')
+Set-StateProperty -Object $genuineState -Name 'lastOpenCodeSessionId' -Value 'ses_genuine' | Out-Null
+Set-StateProperty -Object $genuineState -Name 'durableOpenCodeSessionId' -Value 'ses_genuine' | Out-Null
+Write-JsonFileAtomic -Path $paths.State -Value $genuineState -Depth 12
+
+$genuineRecovery = Invoke-OperatorRecovery -Arguments @('-TaskId', '4.2A', '-RecoverInterrupted')
+Assert-True 'recovery REFUSES a genuine BLOCKED task' ($genuineRecovery.ExitCode -ne 0)
+Assert-True 'the refusal explains why' ($genuineRecovery.Output -match '(?i)genuine')
+$afterGenuine = Read-JsonFile $paths.State
+Assert-Equal 'a genuine BLOCKED keeps its blocked status' 'blocked' $afterGenuine.status
+Assert-Equal 'a genuine BLOCKED keeps its result' 'BLOCKED' $afterGenuine.lastResult
+Assert-Equal 'a genuine BLOCKED keeps its session id' 'ses_genuine' $afterGenuine.durableOpenCodeSessionId
+Assert-Equal 'a genuine BLOCKED is not counted as a recovery' 0 $afterGenuine.recoveryCount
+
+# --- a completed task must never be re-run ---------------------------------
+$doneState = New-AutomationState
+$doneState.status = 'interrupted'
+$doneState.currentTaskId = '4.2A'
+$doneState.completedTaskIds = @('4.2A')
+Write-JsonFileAtomic -Path $paths.State -Value $doneState -Depth 12
+$doneRecovery = Invoke-OperatorRecovery -Arguments @('-TaskId', '4.2A', '-RecoverInterrupted')
+Assert-True 'recovery REFUSES a completed task' ($doneRecovery.ExitCode -ne 0)
+Assert-Equal 'a completed task stays completed' '4.2A' (@((Read-JsonFile $paths.State).completedTaskIds) -join ',')
+
+# --- a different task id must be refused, not silently adopted -------------
+$otherState = New-AutomationState
+$otherState.status = 'interrupted'
+$otherState.currentTaskId = '4.2B'
+Write-JsonFileAtomic -Path $paths.State -Value $otherState -Depth 12
+$otherRecovery = Invoke-OperatorRecovery -Arguments @('-TaskId', '4.2A', '-RecoverInterrupted')
+Assert-True 'recovery REFUSES a task id that is not the persisted one' ($otherRecovery.ExitCode -ne 0)
+Assert-Equal 'the persisted task id is not changed by a refused recovery' '4.2B' (Read-JsonFile $paths.State).currentTaskId
+
+# --- an unknown task id must be refused ------------------------------------
+$unknownRecovery = Invoke-OperatorRecovery -Arguments @('-TaskId', '9.9Z-not-a-task', '-RecoverInterrupted')
+Assert-True 'recovery REFUSES an unknown task id' ($unknownRecovery.ExitCode -ne 0)
+
+# --- recovery must not run while a controller is live ----------------------
+Write-JsonFileAtomic -Path $paths.State -Value $legacyArtifact -Depth 12
+$busyLock = [pscustomobject]@{
+    pid        = $PID
+    machine    = [System.Environment]::MachineName
+    acquiredAt = (Get-IsoTimestamp)
+}
+Write-JsonFileAtomic -Path $paths.Lock -Value $busyLock -Depth 6
+$busyRecovery = Invoke-OperatorRecovery -Arguments @('-TaskId', '4.2A', '-RecoverInterrupted')
+Assert-True 'recovery REFUSES to run while a controller holds the lock' ($busyRecovery.ExitCode -ne 0)
+Assert-Equal 'a refused recovery leaves the state untouched' 'blocked' (Read-JsonFile $paths.State).status
+Remove-Item $paths.Lock -Force -ErrorAction SilentlyContinue
+
+# Every recovery attempt above must have produced an on-disk audit record.
+$recoveryRecords = @(Get-ChildItem (Join-Path $paths.Logs 'recovery') -Filter 'recover-4.2A-*.json' -ErrorAction SilentlyContinue)
+Assert-True 'operator recovery writes an audit record' ($recoveryRecords.Count -ge 2) "found $($recoveryRecords.Count)"
+$lastRecord = Read-JsonFile $recoveryRecords[-1].FullName
+Assert-True 'the audit record never claims completion' ($lastRecord.markedComplete -eq $false)
+Assert-Equal 'the audit record names the task' '4.2A' $lastRecord.taskId
+Assert-Equal 'the audit record preserves the session id' 'ses_f16dae178ffe8SBieuLYtoSEyy' $lastRecord.durableSession
+
 # --- concurrency protection still holds ------------------------------------
 if (Test-Path $paths.Lock) { Remove-Item $paths.Lock -Force }
 $acq = Enter-RunnerLock -MaxAgeHours 12
 Assert-True 'lock is still acquired for the recovery tests' $acq
 Assert-True 'a second acquisition is still refused' ((Enter-RunnerLock -MaxAgeHours 12) -eq $false)
-Assert-True 'an active controller is detected' ((Test-ControllerActive -MaxAgeHours 12) -eq $true)
+Assert-True 'our own lock does not report a competing controller' ((Test-ControllerActive -MaxAgeHours 12) -eq $false)
 Exit-RunnerLock
 Assert-True 'no controller is detected after release' ((Test-ControllerActive -MaxAgeHours 12) -eq $false)
 

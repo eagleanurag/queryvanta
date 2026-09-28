@@ -112,24 +112,34 @@ if ($RecoverInterrupted) {
     # Clear ONLY the interrupted-run markers. Task id, attempt, durable session
     # id and log path are preserved so the next start resumes them. The task is
     # never marked complete, and the working tree is never touched.
+    #
+    # Every write goes through Set-StateProperty, which adds the field when the
+    # loaded state predates it. Direct `$state.x = y` assignment is what failed
+    # here: the live 4.2A state was written by a schemaVersion 1 controller, so
+    # it had no taskCheckpoint member and PowerShell 5.1 refused the assignment
+    # with "The property 'taskCheckpoint' cannot be found on this object".
     $recoveryCount = [int](Get-StateProperty -State $state -Name 'recoveryCount' -Default 0) + 1
-
-    $state.status = 'interrupted'
-    $state.currentTaskId = $task.Id
-    $state.currentAttempt = $attemptNumber
-    Set-StateProperty -Object $state -Name 'durableOpenCodeSessionId' -Value $durableSession
-    Set-StateProperty -Object $state -Name 'interruptedAt' -Value (Get-IsoTimestamp)
-    Set-StateProperty -Object $state -Name 'interruptionReason' -Value 'operator-recovery-after-interrupted-run'
-    Set-StateProperty -Object $state -Name 'recoveryCount' -Value $recoveryCount
-    Set-StateProperty -Object $state -Name 'resumeMode' -Value $null
-    Set-StateProperty -Object $state -Name 'lastError' -Value $null
-    Set-StateProperty -Object $state -Name 'lastResult' -Value $null
-    Set-StateProperty -Object $state -Name 'controllerRunId' -Value $null
 
     # An interrupted run is not a real failure, so drop it from failedTaskIds.
     $failed = @(Get-StateProperty -State $state -Name 'failedTaskIds' -Default @())
     $failed = @($failed | Where-Object { $_ -ne $task.Id })
-    $state.failedTaskIds = $failed
+
+    Set-StateProperty -Object $state -Name 'status' -Value 'interrupted' | Out-Null
+    Set-StateProperty -Object $state -Name 'currentTaskId' -Value $task.Id | Out-Null
+    Set-StateProperty -Object $state -Name 'currentAttempt' -Value $attemptNumber | Out-Null
+    Set-StateProperty -Object $state -Name 'failedTaskIds' -Value $failed | Out-Null
+
+    # The durable session id is carried forward UNCHANGED. It is the only handle
+    # on the interrupted agent context, so it is re-affirmed rather than
+    # rewritten, and it is never replaced with a new id by this script.
+    Set-StateProperty -Object $state -Name 'durableOpenCodeSessionId' -Value $durableSession | Out-Null
+    Set-StateProperty -Object $state -Name 'interruptedAt' -Value (Get-IsoTimestamp) | Out-Null
+    Set-StateProperty -Object $state -Name 'interruptionReason' -Value 'operator-recovery-after-interrupted-run' | Out-Null
+    Set-StateProperty -Object $state -Name 'recoveryCount' -Value $recoveryCount | Out-Null
+    Set-StateProperty -Object $state -Name 'resumeMode' -Value $null | Out-Null
+    Set-StateProperty -Object $state -Name 'lastError' -Value $null | Out-Null
+    Set-StateProperty -Object $state -Name 'lastResult' -Value $null | Out-Null
+    Set-StateProperty -Object $state -Name 'controllerRunId' -Value $null | Out-Null
 
     Save-Checkpoint -State $state -Name 'selected' | Out-Null
     Save-State -State $state
@@ -153,14 +163,16 @@ if ($RecoverInterrupted) {
     Write-JsonFileAtomic -Path (Join-Path $recordDir ("recover-{0}-{1}.json" -f $task.Id, (Get-TimestampTag))) -Value $record -Depth 12
 
     Write-Host 'Recovery recorded. State is now:'
-    Write-Host "  status          : $($state.status)"
-    Write-Host "  currentTaskId   : $($state.currentTaskId)"
-    Write-Host "  currentAttempt  : $($state.currentAttempt)"
+    Write-Host "  status          : $(Get-StateProperty -State $state -Name 'status')"
+    Write-Host "  currentTaskId   : $(Get-StateProperty -State $state -Name 'currentTaskId')"
+    Write-Host "  currentAttempt  : $(Get-StateProperty -State $state -Name 'currentAttempt')"
     Write-Host "  recoveryCount   : $recoveryCount"
-    Write-Host "  durableSession  : $durableSession"
+    Write-Host "  durableSession  : $(Get-StateProperty -State $state -Name 'durableOpenCodeSessionId')"
     Write-Host "  completed       : unchanged ($($completed.Count))"
     Write-Host "  failedTaskIds   : $(if ($failed.Count -eq 0) { '(empty)' } else { $failed -join ', ' })"
     Write-Host ''
+    Write-Host 'This command is idempotent: re-running it leaves the task, attempt and'
+    Write-Host 'durable session untouched and only increments recoveryCount.'
     Write-Host 'The task is NOT complete. Start the controller to resume it:'
     Write-Host "  .\scripts\automation\autonomous-runner.ps1 -TaskId $($task.Id)"
     Write-Host ''
