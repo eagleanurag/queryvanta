@@ -1,0 +1,30 @@
+# QueryVanta Worker — example environment file.
+#
+# Copy to `.dev.vars` for local `wrangler dev`:
+#     Copy-Item .dev.vars.example .dev.vars
+#
+# `.dev.vars` is gitignored. NEVER commit real credentials.
+#
+# Everything here is SERVER-ONLY. None of these values are exposed
+# to the browser bundle, and no `VITE_`-prefixed variable is used
+# to carry a credential.
+
+# GitHub OAuth App client id. Public information; appears in the
+# authorization URL. Set this in wrangler.jsonc `vars` for the
+# deployed environment.
+GITHUB_CLIENT_ID=Iv1.localdevelopmentplaceholder
+
+# GitHub OAuth App client secret. SERVER ONLY.
+# Generate with: npx wrangler secret put GITHUB_CLIENT_SECRET
+GITHUB_CLIENT_SECRET=local-development-secret-do-not-use-in-production
+
+# Secret used to salt session-token hashing and to derive the OAuth
+# state/PKCE material. SERVER ONLY. Must be a long random value.
+# Generate with: npx wrangler secret put SESSION_SECRET
+SESSION_SECRET=local-development-session-secret-change-me-000000
+
+# Comma-separated immutable GitHub NUMERIC user ids allowed to
+# administer. An empty list denies every login (fail closed).
+#
+# Find your numeric id at: https://api.github.com/users/<your-login>
+ADMIN_GITHUB_IDS=12345678

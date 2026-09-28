@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ChangeEvent } from "react";
 
 import {
@@ -7,6 +13,7 @@ import {
   Copy,
   Download,
   Eye,
+  Loader2,
   Pencil,
   Play,
   Plus,
@@ -34,7 +41,6 @@ import { questions as builtInQuestions } from "../data/questions";
 
 import {
   clearAdminQuestions,
-  combineQuestionCatalogs,
   deleteAdminQuestion,
   deleteAdminQuestions,
   duplicateAdminQuestion,
@@ -46,6 +52,23 @@ import {
   updateAdminQuestion,
   validateImportedQuestions,
 } from "../lib/adminQuestions";
+import {
+  loadAdminCatalog,
+  localAdminQuestionCount,
+  readLocalAdminQuestions,
+  serverBackedSessionActive,
+  serverCreate,
+  serverDelete,
+  serverDuplicate,
+  serverImport,
+  serverPublish,
+  serverToggleEnabled,
+  serverUpdate,
+} from "../lib/adminServerSync";
+import {
+  mergeAdminCatalog,
+  type ServerCatalogEntry,
+} from "../lib/questionCatalog";
 import { getBookmarkedQuestionIds } from "../lib/bookmarks";
 import SEO from "../components/SEO";
 import {
@@ -160,9 +183,34 @@ const inputClassName =
 const labelClassName =
   "mb-1.5 block text-sm font-medium text-gray-700";
 
+type ServerSyncState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "ok"; message: string }
+  | { kind: "error"; message: string };
+
 function AdminPage() {
   const location = useLocation();
   const navigate = useNavigate();
+
+  // True when an administrator session is active, meaning D1 is the
+  // authoritative source for shared admin questions.
+  const [serverBacked, setServerBacked] =
+    useState(false);
+  const [serverSyncState, setServerSyncState] =
+    useState<ServerSyncState>({ kind: "idle" });
+
+  /**
+   * The server catalog, including DRAFTS.
+   *
+   * `null` means "not loaded yet" (or no session). The local
+   * localStorage mirror is deliberately NOT used to populate this:
+   * the mirror only ever holds published questions, so a draft
+   * would be invisible in the admin UI even though the API returns
+   * it. The server is the source of truth.
+   */
+  const [serverEntries, setServerEntries] =
+    useState<ServerCatalogEntry[] | null>(null);
 
   const incomingDraft = (
     location.state as {
@@ -298,6 +346,63 @@ function AdminPage() {
     };
   }, []);
 
+  // Reload the authoritative server catalog and refresh the
+  // public mirror in one pass.
+  const refreshServerCatalog = useCallback(async () => {
+    const result = await loadAdminCatalog();
+
+    if (result.ok) {
+      setServerEntries(result.data.questions);
+      setServerSyncState({
+        kind: "ok",
+        message:
+          `Shared catalog loaded: ${result.data.count} question(s) ` +
+          `on the server, ${Math.max(0, result.data.publicCount)} ` +
+          "published.",
+      });
+
+      return;
+    }
+
+    // A failed sync must NOT silently present the local list as if
+    // it were the current server catalog.
+    setServerSyncState({
+      kind: "error",
+      message:
+        `${result.message} Showing local browser data, which is ` +
+        "NOT the current server catalog.",
+    });
+  }, []);
+
+  // Initial load: detect the session, then explicitly fetch the
+  // server catalog.
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      const active = await serverBackedSessionActive();
+
+      if (cancelled) {
+        return;
+      }
+
+      if (!active) {
+        setServerBacked(false);
+
+        return;
+      }
+
+      setServerBacked(true);
+      setServerSyncState({ kind: "loading" });
+
+      await refreshServerCatalog();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshServerCatalog]);
+
   // Ephemeral validation badges reset whenever the
   // catalog changes so stale results cannot linger.
   const applyAdminQuestions = (
@@ -311,13 +416,18 @@ function AdminPage() {
   // Effective catalog: built-in questions first
   // in catalog order, then admin questions. Built-in
   // entries win on ID collision.
+  //
+  // Source selection lives in mergeAdminCatalog so there is a
+  // single tested implementation of the rule.
   const effectiveCatalog = useMemo(
     () =>
-      combineQuestionCatalogs(
-        builtInQuestions,
-        adminQuestions,
-      ),
-    [adminQuestions],
+      mergeAdminCatalog({
+        builtIn: builtInQuestions,
+        serverEntries,
+        localEntries: adminQuestions,
+        serverBacked,
+      }),
+    [adminQuestions, serverBacked, serverEntries],
   );
 
   const builtInIds = useMemo(
@@ -972,6 +1082,30 @@ function AdminPage() {
     setCreatedQuestionId(question.id);
     setEditingQuestionId(null);
     resetForm();
+
+    // Persist to D1 when an administrator session is active, then
+    // reload the authoritative catalog so the list reflects the
+    // server (including the draft the server just stored).
+    if (serverBacked) {
+      void (async () => {
+        setServerSyncState({ kind: "loading" });
+
+        const result = isEditing
+          ? await serverUpdate(question)
+          : await serverCreate(question);
+
+        if (!result.ok) {
+          setServerSyncState({
+            kind: "error",
+            message: result.message,
+          });
+
+          return;
+        }
+
+        await refreshServerCatalog();
+      })();
+    }
   };
 
   const handlePreview = () => {
@@ -1450,12 +1584,33 @@ function AdminPage() {
       setErrors([]);
       resetForm();
     }
+
+    if (serverBacked) {
+      void (async () => {
+        setServerSyncState({ kind: "loading" });
+
+        const result = await serverDelete(questionId);
+
+        if (!result.ok) {
+          setServerSyncState({
+            kind: "error",
+            message: result.message,
+          });
+
+          return;
+        }
+
+        await refreshServerCatalog();
+      })();
+    }
   };
 
   const handleToggleEnabled = (
     questionId: string,
   ) => {
-    const target = adminQuestions.find(
+    // Look up in the effective catalog so a server-backed
+    // question (absent from the local mirror) is found.
+    const target = effectiveCatalog.find(
       (item) => item.id === questionId,
     );
 
@@ -1463,12 +1618,70 @@ function AdminPage() {
       return;
     }
 
+    const nextEnabled = !isQuestionEnabled(target);
+
     applyAdminQuestions(
-      setAdminQuestionEnabled(
-        questionId,
-        !isQuestionEnabled(target),
-      ),
+      setAdminQuestionEnabled(questionId, nextEnabled),
     );
+
+    if (serverBacked) {
+      void (async () => {
+        setServerSyncState({ kind: "loading" });
+
+        const result = await serverToggleEnabled(
+          questionId,
+          nextEnabled,
+        );
+
+        if (!result.ok) {
+          setServerSyncState({
+            kind: "error",
+            message: result.message,
+          });
+
+          return;
+        }
+
+        await refreshServerCatalog();
+      })();
+    }
+  };
+
+  const handleTogglePublished = (
+    questionId: string,
+  ) => {
+    const target = effectiveCatalog.find(
+      (item) => item.id === questionId,
+    );
+
+    if (!target) {
+      return;
+    }
+
+    const entry = target as ServerCatalogEntry;
+    const nextPublished = entry.published !== true;
+
+    if (serverBacked) {
+      void (async () => {
+        setServerSyncState({ kind: "loading" });
+
+        const result = await serverPublish(
+          questionId,
+          nextPublished,
+        );
+
+        if (!result.ok) {
+          setServerSyncState({
+            kind: "error",
+            message: result.message,
+          });
+
+          return;
+        }
+
+        await refreshServerCatalog();
+      })();
+    }
   };
 
   const toggleSelectedId = (questionId: string) => {
@@ -1542,16 +1755,22 @@ function AdminPage() {
     setCreatedQuestionId("");
   };
 
-  const handleDuplicate = (questionId: string) => {
-    const existing = adminQuestions.find(
+  const handleDuplicate = async (
+    questionId: string,
+  ) => {
+    // Look up in the effective catalog so a server-backed
+    // question can be duplicated even though it is absent from
+    // the local mirror.
+    const existing = effectiveCatalog.find(
       (item) => item.id === questionId,
     );
 
     // Built-in questions are immutable, so
     // duplicating one creates a new editable
     // admin copy instead of touching the catalog.
-    const copy =
-      existing !== undefined
+    const copy: Question | null =
+      existing !== undefined &&
+      !builtInIds.has(questionId)
         ? duplicateAdminQuestion(questionId)
         : (() => {
             const source = builtInQuestions.find(
@@ -1590,6 +1809,28 @@ function AdminPage() {
       `Question "${copy.title}" duplicated successfully.`,
     );
     setCreatedQuestionId(copy.id);
+
+    if (serverBacked) {
+      setServerSyncState({ kind: "loading" });
+
+      // A duplicate of a built-in question is created server-side
+      // from the local copy, because the immutable bundled catalog
+      // is not a D1 row. The server always stores it unpublished.
+      const persisted = builtInIds.has(questionId)
+        ? await serverCreate(copy)
+        : await serverDuplicate(questionId, copy.id);
+
+      if (!persisted.ok) {
+        setServerSyncState({
+          kind: "error",
+          message: persisted.message,
+        });
+
+        return;
+      }
+
+      await refreshServerCatalog();
+    }
   };
 
   const handleClearAll = () => {
@@ -1694,6 +1935,84 @@ function AdminPage() {
       }.`,
     );
     setCreatedQuestionId("");
+
+    // When a server session is active, also push these records to
+    // D1. Existing ids are skipped, never overwritten.
+    if (serverBacked) {
+      setServerSyncState({ kind: "loading" });
+
+      const migrated = await serverImport(validation.questions);
+
+      if (!migrated.ok) {
+        setServerSyncState({
+          kind: "error",
+          message: migrated.message,
+        });
+
+        return;
+      }
+
+      await refreshServerCatalog();
+
+      setServerSyncState({
+        kind: "ok",
+        message:
+          `Migrated ${migrated.data.imported} to the shared catalog, ` +
+          `skipped ${migrated.data.skipped} existing id(s).`,
+      });
+    }
+  };
+
+  // Deliberate migration of existing browser-local admin questions
+  // into the shared catalog, with a review step first.
+  const handleMigrateLocal = async () => {
+    const pending = localAdminQuestionCount();
+
+    if (pending === 0) {
+      setServerSyncState({
+        kind: "ok",
+        message: "There are no browser-local questions to migrate.",
+      });
+
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `${pending} browser-local question${
+          pending === 1 ? "" : "s"
+        } will be copied into the shared catalog as unpublished ` +
+          "drafts. IDs that already exist on the server are skipped " +
+          "and never overwritten. Continue?",
+      )
+    ) {
+      return;
+    }
+
+    setServerSyncState({ kind: "loading" });
+
+    const migrated = await serverImport(
+      readLocalAdminQuestions(),
+    );
+
+    if (!migrated.ok) {
+      setServerSyncState({
+        kind: "error",
+        message: migrated.message,
+      });
+
+      return;
+    }
+
+    await refreshServerCatalog();
+
+    setServerSyncState({
+      kind: "ok",
+      message:
+        `Migration complete: ${migrated.data.imported} imported, ` +
+        `${migrated.data.skipped} skipped, ` +
+        `${migrated.data.failed} failed.`,
+    });
   };
 
   return (
@@ -1731,9 +2050,76 @@ function AdminPage() {
           </h1>
 
           <p className="mt-1 text-sm text-gray-500">
-            Create and manage SQL and PySpark
-            practice questions locally.
+            {serverBacked
+              ? "Create and manage SQL and PySpark practice questions in the shared catalog. The server is the source of truth; built-in questions are immutable."
+              : "Create and manage SQL and PySpark practice questions in this browser."}
           </p>
+
+          {serverBacked && (
+            <div
+              data-testid="server-sync-panel"
+              className="mt-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+            >
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm font-medium text-gray-900">
+                  Shared catalog
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    void refreshServerCatalog()
+                  }
+                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                >
+                  Sync now
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    void handleMigrateLocal()
+                  }
+                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                >
+                  Migrate browser-local questions
+                </button>
+
+                {serverSyncState.kind === "loading" && (
+                  <span
+                    role="status"
+                    className="inline-flex items-center gap-1.5 text-xs text-gray-500"
+                  >
+                    <Loader2
+                      size={12}
+                      className="animate-spin"
+                    />
+                    Loading server catalog…
+                  </span>
+                )}
+              </div>
+
+              {serverSyncState.kind === "ok" && (
+                <p
+                  role="status"
+                  data-testid="server-sync-ok"
+                  className="mt-2 text-xs text-emerald-700"
+                >
+                  {serverSyncState.message}
+                </p>
+              )}
+
+              {serverSyncState.kind === "error" && (
+                <p
+                  role="alert"
+                  data-testid="server-sync-error"
+                  className="mt-2 text-xs text-red-700"
+                >
+                  {serverSyncState.message}
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
@@ -2872,6 +3258,10 @@ function AdminPage() {
                     !builtInIds.has(item.id);
                   const itemEnabled =
                     isQuestionEnabled(item);
+                  const itemPublished =
+                    isAdminManaged &&
+                    (item as ServerCatalogEntry)
+                      .published === true;
                   const run =
                     validationRuns[item.id];
                   const validationLabel =
@@ -2941,6 +3331,20 @@ function AdminPage() {
                             </span>
                           )}
 
+                          {!builtInIds.has(item.id) && (
+                            <span
+                              className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-medium ${
+                                itemPublished
+                                  ? "bg-blue-50 text-blue-600"
+                                  : "bg-amber-50 text-amber-700"
+                              }`}
+                            >
+                              {itemPublished
+                                ? "Published"
+                                : "Draft"}
+                            </span>
+                          )}
+
                           <span
                             title={
                               run !== undefined
@@ -2993,7 +3397,17 @@ function AdminPage() {
                         )}
                       </div>
 
-                      <span className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
+                      {/*
+                        No `shrink-0` here: with five row actions
+                        (Edit / Duplicate / Enable-Disable / Publish /
+                        Delete) the cluster is wider than a 390px
+                        viewport. `shrink-0` prevented it from
+                        shrinking, so the trailing actions were
+                        pushed outside the viewport and became
+                        unclickable on mobile. Allowing it to shrink
+                        makes `flex-wrap` actually wrap.
+                      */}
+                      <span className="ml-auto flex flex-wrap items-center justify-end gap-2">
                         <Link
                           to={`/question/${item.id}`}
                           className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
@@ -3039,6 +3453,20 @@ function AdminPage() {
                               {itemEnabled
                                 ? "Disable"
                                 : "Enable"}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleTogglePublished(
+                                  item.id,
+                                )
+                              }
+                              className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+                            >
+                              {itemPublished
+                                ? "Unpublish"
+                                : "Publish"}
                             </button>
 
                             <button
