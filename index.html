@@ -2,6 +2,28 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Root-relative on purpose.
+
+      `favicon.svg` lives in public/, and Vite rewrites root-relative
+      public-asset references with the configured base in BOTH `vite
+      dev` and `vite build`. Verified for all three modes:
+
+        dev (pages base)   ->  base + favicon.svg
+        build:pages        ->  base + favicon.svg
+        build:worker       ->  /favicon.svg
+
+      Do NOT use %BASE_URL% here. Vite substitutes the placeholder
+      first and then applies its own public-asset rewrite, so the dev
+      URL ends up with the base applied twice and 404s. Measured, not
+      assumed.
+
+      This comment deliberately avoids writing the GitHub Pages base
+      literally: scripts/verify-build.mjs and
+      scripts/predeploy-worker.mjs fail a Worker build whose
+      index.html contains that path anywhere, and a guard that trips
+      on accurate documentation is a guard that gets switched off.
+    -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#111827" />
@@ -12,7 +34,23 @@
     />
     <meta name="robots" content="index,follow" />
     <meta name="msvalidate.01" content="3BF41417A7A3291E9FF16C1EDD42AA74" />
-    <link rel="canonical" href="https://eagleanurag.github.io/queryvanta/" />
+    <!--
+      Origin-aware. Vite replaces %VITE_QV_SITE_URL% with the public
+      site URL of the selected deployment target:
+
+        dev / build:pages  ->  https://eagleanurag.github.io/queryvanta
+        build:worker       ->  https://queryvanta.queryvanta.workers.dev
+
+      `scripts/build.mjs` and `scripts/dev.mjs` both set the variable
+      from config/deploy-targets.ts, so the dev server and the
+      production bundles can never disagree. This is a public URL, not
+      a credential. `scripts/verify-build.mjs` fails the build if any
+      placeholder is left unreplaced.
+    -->
+    <link
+      rel="canonical"
+      href="%VITE_QV_SITE_URL%/"
+    />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="QueryVanta" />
     <meta
@@ -23,8 +61,14 @@
       property="og:description"
       content="Practice SQL and PySpark online for free with real browser-based execution. Data Engineering questions, learning paths, mock interviews and practice analytics."
     />
-    <meta property="og:url" content="https://eagleanurag.github.io/queryvanta/" />
-    <meta property="og:image" content="https://eagleanurag.github.io/queryvanta/og-image.svg" />
+    <meta
+      property="og:url"
+      content="%VITE_QV_SITE_URL%/"
+    />
+    <meta
+      property="og:image"
+      content="%VITE_QV_SITE_URL%/og-image.svg"
+    />
     <meta name="twitter:card" content="summary" />
     <meta
       name="twitter:title"
@@ -34,7 +78,10 @@
       name="twitter:description"
       content="Practice SQL and PySpark online for free with real browser-based execution. Data Engineering questions, learning paths, mock interviews and practice analytics."
     />
-    <meta name="twitter:image" content="https://eagleanurag.github.io/queryvanta/og-image.svg" />
+    <meta
+      name="twitter:image"
+      content="%VITE_QV_SITE_URL%/og-image.svg"
+    />
   </head>
   <body>
     <div id="root"></div>

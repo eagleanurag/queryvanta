@@ -11,13 +11,14 @@
 //     crawlers without JS; the React app serves the same URLs
 //     for in-app navigation with identical H1/copy essence)
 //
-// Deterministic output: no timestamps. Run via the `prebuild`
-// npm script with Node type-stripping (sources use erasable
-// syntax only, enforced by tsconfig `erasableSyntaxOnly`).
+// Deterministic output: no timestamps. Run by `scripts/build.mjs`
+// with Node type-stripping (sources use erasable syntax only,
+// enforced by tsconfig `erasableSyntaxOnly`).
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveTarget } from "../config/deploy-targets.ts";
 import { questions } from "../src/data/questions.ts";
 import {
   LANDING_PAGES,
@@ -28,7 +29,20 @@ import {
   slugifyTopic,
 } from "../src/lib/learning.ts";
 
-const SITE_URL = "https://eagleanurag.github.io/queryvanta";
+/**
+ * The origin this build is for.
+ *
+ * `scripts/build.mjs` sets QV_SITE_URL from the shared target table,
+ * so the sitemap, canonical URLs, JSON-LD and Open Graph tags always
+ * point at the deployment that is actually serving the site:
+ *
+ *   build:pages  ->  https://eagleanurag.github.io/queryvanta
+ *   build:worker ->  https://queryvanta.queryvanta.workers.dev
+ */
+const SITE_URL = (
+  process.env.QV_SITE_URL ??
+  resolveTarget(process.env.QV_TARGET).siteUrl
+).replace(/\/+$/, "");
 
 const __dirname = path.dirname(
   fileURLToPath(import.meta.url),

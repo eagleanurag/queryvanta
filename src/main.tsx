@@ -7,9 +7,11 @@ import {
 } from "react-router-dom";
 
 import App from "./App";
+import AdminGate from "./components/AdminGate";
 import ErrorBoundary from "./components/ErrorBoundary";
 import NotFoundPage from "./pages/NotFoundPage";
 import {
+  AdminLoginPage,
   AdminPage,
   InterviewPage,
   LandingPage,
@@ -39,13 +41,26 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/" element={<App />} />
 
             <Route
+              path="/admin/login"
+              element={<AdminLoginPage />}
+            />
+
+            <Route
               path="/admin"
-              element={<AdminPage />}
+              element={
+                <AdminGate>
+                  <AdminPage />
+                </AdminGate>
+              }
             />
 
             <Route
               path="/admin/questions"
-              element={<AdminPage />}
+              element={
+                <AdminGate>
+                  <AdminPage />
+                </AdminGate>
+              }
             />
 
             <Route
@@ -139,7 +154,11 @@ createRoot(document.getElementById("root")!).render(
 
             <Route
               path="/admin/preview"
-              element={<QuestionPage />}
+              element={
+                <AdminGate>
+                  <QuestionPage />
+                </AdminGate>
+              }
             />
 
             <Route

@@ -53,12 +53,222 @@ docker compose up -d   # provides the Envoy grpc-web proxy + Spark Connect
 ```
 
 Quality checks:
+```sh
+npm run build           # TypeScript + production build
+npm run lint            # ESLint
+git diff --check        # whitespace check
+npm run test:unit       # secret-exposure checks (reads real dist/)
+npm run test:security   # security suite against a real local Worker + local D1
+npm run test:worker     # production-like Worker asset/API suite
+npm run test:server     # all of the above
+npm run test:browser    # Playwright E2E (desktop + mobile)
+```
+
+Browser tests target `QV_BASE_URL` (which must keep its trailing
+slash) and navigate with base-relative paths:
 
 ```sh
-npm run build      # TypeScript + production build
-npm run lint       # ESLint
-git diff --check   # whitespace check
+npm run dev -- --port 5173 --strictPort
+$env:QV_BASE_URL = "http://localhost:5173/queryvanta/"
+npm run test:browser
 ```
+
+The server suites boot their own Worker on port 8787 against a
+throwaway local D1 database, and tear it down afterwards.
+
+Two suites need a live Worker serving the real built bundle and skip
+unless `QV_BASE_URL` points at `server/tests/.admin-env.json`:
+
+```sh
+npm run build:worker
+node --experimental-strip-types server/tests/admin-env.ts up
+$env:QV_BASE_URL = "http://127.0.0.1:<port printed by the script>/"
+npx playwright test tests/e2e/12-admin-d1-catalog.spec.ts tests/e2e/13-worker-build-base.spec.ts
+```
+
+They only ever touch a **local** D1. `12-` proves the admin catalog
+comes from D1 (TEST A–J); `13-` proves a Worker build never requests
+`/queryvanta/assets/` and never serves a module as `text/html`.
+
+## Architecture
+
+QueryVanta is a browser-local learning application with an optional
+server tier for administration.
+
+```
+GitHub repo
+   ├── GitHub Pages (static, existing fallback)  -> no admin
+   └── Cloudflare Worker (preferred)
+         ├── Workers Static Assets -> dist/  (SPA, HTTP 200 deep links)
+         ├── /api/auth/*      GitHub OAuth + server sessions
+         ├── /api/questions/* public read-only catalog
+         ├── /api/admin/*     protected CRUD + audit log
+         └── D1 (SQLite)  questions, sessions, oauth transactions, audit
+```
+
+Static assets and the API share one origin, so the administrator
+session cookie is first-party — no CORS, and `SameSite=Lax` is
+meaningful.
+
+- `docs/security/admin-auth.md` — authentication and session model.
+- `docs/architecture/admin-persistence.md` — schema, API and data flow.
+- `docs/qa/baseline-browser-audit.md` — audit **before** the change.
+- `docs/qa/post-implementation-browser-audit.md` — audit **after**.
+
+### Administrator access
+
+`/admin/questions` and `/admin/preview` are wrapped in
+`src/components/AdminGate.tsx`. That gate is **user experience only**:
+every admin API endpoint independently verifies the server session, so
+removing the gate would grant nothing. Sign-in is GitHub OAuth with
+PKCE, and authorization uses the **immutable GitHub numeric user id**.
+
+On a deployment with no backend (GitHub Pages) the gate detects this
+and disables question management with an explanation, rather than
+offering a client-only password check.
+
+### Question storage
+
+- The bundled catalog in `src/data/questions.ts` is unchanged and
+  always wins on ID collision.
+- D1 is the source of truth for administration. Published server
+  questions are mirrored into the existing
+  `queryvanta-admin-questions` localStorage record, so discovery,
+  practice, learning and interview needed no changes.
+- A question is publicly visible only when `enabled AND published AND
+  NOT deleted`, enforced in SQL.
+- Deletion is a soft delete, so history and audit references survive.
+- Existing browser-local questions are migrated deliberately from the
+  admin UI (count shown, confirmation required, existing ids skipped,
+  imports land as unpublished drafts). They are never auto-migrated and
+  never overwritten.
+
+### Build targets
+
+The deployment target is an explicit argument, not an ambient
+environment variable. Both deployments are built from the same
+pipeline; only the base path and the public origin differ.
+
+| Command | Base | Public origin |
+| --- | --- | --- |
+| `npm run build:pages` | `/queryvanta/` | `https://eagleanurag.github.io/queryvanta` |
+| `npm run build:worker` | `/` | `https://queryvanta.queryvanta.workers.dev` |
+| `npm run build` | alias of `build:pages` | — |
+
+`npm run build` stays on the GitHub Pages target because the live
+Pages workflow runs it; changing the default would silently repoint
+the published site.
+
+Each build:
+
+1. regenerates `public/sitemap.xml` and the landing snapshots for
+   the selected origin,
+2. typechecks (`tsc -b`),
+3. builds with the target base,
+4. writes `.qv-build.json` (gitignored) recording the target, and
+5. runs `scripts/verify-build.mjs`, which fails the build if the
+   artefact does not match the target.
+
+The target table lives in `config/deploy-targets.ts` and is the
+single source of truth for `vite.config.ts`, the SEO generator,
+`src/lib/seo.ts` and both verification scripts.
+
+`VITE_QV_API_BASE` may point the API client at a different origin. It
+is public configuration and must never carry a credential.
+
+## Cloudflare deployment
+
+### One-time setup
+
+```sh
+npm install
+npx wrangler login
+
+# Create the D1 database and note the id
+npx wrangler d1 create queryvanta
+```
+
+Put the returned id in `wrangler.jsonc` -> `d1_databases[0].database_id`.
+
+### GitHub OAuth app
+
+Create an OAuth app at <https://github.com/settings/developers> ->
+**OAuth Apps** -> **New OAuth App**:
+
+- **Homepage URL**: your Worker URL, e.g.
+  `https://queryvanta.example.workers.dev`
+- **Authorization callback URL**:
+  `https://queryvanta.example.workers.dev/api/auth/github/callback`
+
+### Secrets and configuration
+
+```sh
+npx wrangler secret put GITHUB_CLIENT_SECRET
+npx wrangler secret put SESSION_SECRET
+```
+
+`SESSION_SECRET` should be a long random value, for example:
+
+```sh
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+
+Non-secret values live in `wrangler.jsonc` `vars`:
+
+| Var | Purpose |
+| --- | --- |
+| `GITHUB_CLIENT_ID` | public OAuth client id |
+| `ADMIN_GITHUB_IDS` | comma-separated **numeric** GitHub user ids allowed to administer |
+| `APP_ORIGIN` | the deployment origin, used for OAuth redirects and origin checks |
+| `ENVIRONMENT` | `production` for the live deployment |
+
+Find your numeric GitHub id at `https://api.github.com/users/<your-login>`.
+
+`ADMIN_GITHUB_IDS` **fails closed**: an empty list denies every login.
+
+### Apply the schema and deploy
+
+```sh
+npm run build:worker
+npx wrangler d1 execute queryvanta --remote --file=migrations/0001_init.sql
+npm run verify:worker
+npx wrangler deploy --config ./wrangler.jsonc
+```
+
+`npm run verify:worker` is a hard gate. It inspects the real `dist/`
+and refuses to let a GitHub Pages build reach the Worker — the
+failure that produced blank pages with MIME-type errors, because the
+browser requested `/queryvanta/assets/...` on the Worker and the SPA
+fallback answered with `index.html` as `text/html`. It fails when:
+
+- `dist/index.html` contains `/queryvanta/`
+- any built JS/CSS embeds the Pages base in live code
+- `dist/index.html` does not reference a root-based `/assets/...`
+- the recorded build target is not `worker`, or its base is not `/`
+
+The remediation it prints is always `npm run build:worker`.
+
+`npm run build:worker` also runs `scripts/verify-build.mjs`, so a
+malformed artefact is caught at build time rather than at deploy
+time.
+
+### Local Worker development
+
+```sh
+Copy-Item .dev.vars.example .dev.vars   # then fill in real values
+npm run d1:migrate:local
+npm run worker:dev
+```
+
+`.dev.vars` is gitignored. `.dev.vars.example` documents the shape
+with placeholders only.
+
+### Rollback
+
+The GitHub Pages workflow is untouched and remains the fallback. If
+the Worker deployment is abandoned, revert the code; no data migration
+is required, because D1 is additive and the localStorage mirror keeps
+working.
 
 ## PySpark requirements
 
@@ -73,7 +283,10 @@ grpc-web proxy:
   sends `Cross-Origin-Opener-Policy: same-origin` and
   `Cross-Origin-Embedder-Policy: credentialless` (see `vite.config.ts`).
   **Production hosting must send equivalent headers**, otherwise PySpark boot
-  fails with an explanatory error and everything else keeps working.
+  fails with an explanatory error and everything else keeps working. The
+  Cloudflare Worker sends them on every asset response. **GitHub Pages
+  cannot send them**, so PySpark cannot boot there; SQL, learning, practice,
+  interviews and reading all work normally.
 - Without a reachable Spark stack, PySpark questions show a clear execution
   error after the documented 120-second timeout; SQL, learning, practice and
   admin flows are unaffected.
@@ -151,7 +364,8 @@ SEO implementation: per-route metadata via `src/components/SEO.tsx` +
 JSON-LD only). Filtered discovery states (`?q=…`, bookmark-only) canonical
 to `/` with `noindex,follow`. Sitemap and static landing snapshots are
 generated at build time from the canonical catalog by
-`scripts/generate-seo-assets.mjs` (runs in `prebuild`; `public/robots.txt`
+`scripts/generate-seo-assets.mjs` (invoked by `scripts/build.mjs`;
+`public/robots.txt`
 allows public crawlers including `OAI-SearchBot` and references the
 sitemap).
 
@@ -159,15 +373,17 @@ sitemap).
 
 | Key | Store | Contents |
 | --- | --- | --- |
-| `queryvanta-admin-questions` | localStorage | Admin-managed questions |
+| `queryvanta-admin-questions` | localStorage | Published questions mirrored from D1 (or browser-local when there is no backend) |
 | `queryvanta-solved-questions` | localStorage | Solved question IDs |
 | `queryvanta-bookmarked-questions` | localStorage | Bookmarked question IDs |
 | `queryvanta-practice-history` | localStorage | Finished sessions (max 20) |
 | `queryvanta-question-attempts` | localStorage | Execution attempts (max 10/question) |
 | `queryvanta-practice-session` | sessionStorage | Active session (incl. interview deadline) |
+| `qv_admin_session` | cookie (HttpOnly) | Administrator session. **Never readable by JavaScript**, never mirrored into web storage. |
 
 All readers tolerate missing or malformed data and fall back to safe
-defaults without touching unrelated keys.
+defaults without touching unrelated keys. No authentication token,
+bearer token or password is ever written to web storage.
 
 ## Search Console / webmaster actions (post-deployment)
 

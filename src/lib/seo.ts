@@ -1,7 +1,27 @@
 import type { Question } from "../data/questions.ts";
 
-export const SITE_URL =
+/**
+ * The public origin of THIS build.
+ *
+ * QueryVanta is served from two places with different origins, and
+ * canonical URLs, the sitemap and Open Graph tags must match
+ * whichever one is actually serving the page:
+ *
+ *   GitHub Pages  ->  https://eagleanurag.github.io/queryvanta
+ *   Cloudflare    ->  https://queryvanta.queryvanta.workers.dev
+ *
+ * `scripts/build.mjs` injects `VITE_QV_SITE_URL` from the shared
+ * target table in `config/deploy-targets.mjs`. This is a public
+ * URL, not a credential, so the `VITE_` prefix is appropriate here;
+ * no secret is ever exposed to the client bundle.
+ *
+ * The fallback keeps `vite dev` and any unbundled usage working.
+ */
+const configuredSiteUrl =
+  import.meta.env.VITE_QV_SITE_URL ??
   "https://eagleanurag.github.io/queryvanta";
+
+export const SITE_URL = configuredSiteUrl.replace(/\/+$/, "");
 
 export const SITE_NAME = "QueryVanta";
 
