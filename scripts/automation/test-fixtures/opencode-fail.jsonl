@@ -1,0 +1,6 @@
+{"type":"step-start","id":"stp_01","sessionID":"ses_autonomous_fail_fixture"}
+this line is deliberately not valid JSON and must be skipped, not fatal
+{"type":"text","sessionID":"ses_autonomous_fail_fixture","part":{"type":"text","text":"Attempted the change but could not finish it."}}
+{"type":"text","sessionID":"ses_autonomous_fail_fixture","part":{"type":"text","text":"AUTONOMOUS_TASK_STATUS: FAIL"}}
+{"type":"text","sessionID":"ses_autonomous_fail_fixture","part":{"type":"text","text":"AUTONOMOUS_TASK_ID: 4.2A"}}
+{"type":"text","sessionID":"ses_autonomous_fail_fixture","part":{"type":"text","text":"Summary: verification failed on the lint gate."}}

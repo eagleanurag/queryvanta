@@ -125,6 +125,31 @@ export type AuditEntry = {
   createdAt: string;
 };
 
+/**
+ * Delete audit rows older than the retention window.
+ *
+ * `retentionDays` is a positive number of days; the cutoff is computed
+ * here and bound as a parameter, so no value is ever interpolated into
+ * the SQL. `admin_audit_log` already has an index on `created_at DESC`,
+ * so the time-windowed delete uses the existing index — no schema
+ * change is required.
+ */
+export async function purgeAuditLog(
+  db: D1Database,
+  retentionDays: number,
+): Promise<void> {
+  const cutoff = new Date(
+    Date.now() - retentionDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  await db
+    .prepare(
+      `DELETE FROM admin_audit_log WHERE created_at < ?`,
+    )
+    .bind(cutoff)
+    .run();
+}
+
 export async function listAudit(
   db: D1Database,
   options: { limit?: number; questionId?: string | null } = {},

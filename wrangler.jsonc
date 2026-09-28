@@ -20,10 +20,23 @@
       "migrations_dir": "migrations"
     }
   ],
+  "triggers": {
+    // Daily at 04:00 UTC. Off-peak for US and European business
+    // hours, and daily is sufficient: session and OAuth-transaction
+    // TTLs are hours-long, and audit retention is a storage bound
+    // rather than a security control, so there is no need to run
+    // more often. One cheap invocation per day keeps housekeeping
+    // off the request path without adding meaningful cost.
+    "crons": ["0 4 * * *"]
+  },
   "vars": {
     "ENVIRONMENT": "production",
     "APP_ORIGIN": "https://queryvanta.queryvanta.workers.dev",
     "GITHUB_CLIENT_ID": "Ov23liesFfVbuqjvWt7A",
-    "ADMIN_GITHUB_IDS": "22770735"
+    "ADMIN_GITHUB_IDS": "22770735",
+    // Retention window for admin_audit_log, in days. Not a secret.
+    // A missing, zero, negative or non-numeric value falls back to
+    // the documented default (90) at read time.
+    "AUDIT_RETENTION_DAYS": "90"
   }
 }

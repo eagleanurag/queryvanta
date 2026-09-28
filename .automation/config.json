@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "project": "queryvanta",
+  "description": "Controller configuration for autonomous roadmap execution via OpenCode. Values here are controller policy only and never contain secrets.",
+  "repository": {
+    "expectedBranch": "main",
+    "expectedHeadAtBootstrap": "2cf3d57",
+    "requireCleanWorkingTreeAtStart": false,
+    "allowUnexpectedHeadChange": false
+  },
+  "paths": {
+    "automationRoot": ".automation",
+    "roadmap": ".automation/roadmap.json",
+    "state": ".automation/state.json",
+    "tasks": ".automation/tasks",
+    "logs": ".automation/logs",
+    "failures": ".automation/failures",
+    "lock": ".automation/.runner.lock",
+    "approvedAudit": "docs/qa/phase-4-abuse-audit.md"
+  },
+  "opencode": {
+    "command": "opencode",
+    "mode": "standalone",
+    "format": "json",
+    "auto": true,
+    "agent": null,
+    "model": null,
+    "useBackgroundServer": false,
+    "forbiddenFlags": [
+      "--server"
+    ],
+    "notes": "Each task gets its own standalone process. --server is never used because the running background service does not expose a compatible V2 health response."
+  },
+  "execution": {
+    "maxAttemptsPerTask": 2,
+    "recoveryInvocationsPerFailure": 1,
+    "stopOnStatus": [
+      "BLOCKED"
+    ],
+    "requireStatusMarker": true,
+    "pauseOnVerificationFailure": true
+  },
+  "lock": {
+    "maxAgeHours": 12,
+    "reclaimStaleLock": true
+  },
+  "gitPolicy": {
+    "autoCommit": false,
+    "autoPush": false,
+    "allowCommitWhenTaskPermits": true,
+    "forbidDestructiveGit": true,
+    "destructivePatterns": [
+      "git reset --hard",
+      "git clean -fd",
+      "git clean -fdx",
+      "git checkout -- .",
+      "git push --force",
+      "git push -f"
+    ]
+  },
+  "safety": {
+    "forbiddenOperations": [
+      "wrangler deploy",
+      "wrangler publish",
+      "d1 execute --remote",
+      "--remote --file",
+      "wrangler secret put",
+      "wrangler secret delete",
+      "git push",
+      "git reset --hard",
+      "git clean -fd",
+      "gh secret set",
+      "gh secret delete"
+    ],
+    "forbiddenOperationsNote": "Detected in a task file, they are refused before the task starts. Detected in agent output, the run is halted and marked BLOCKED.",
+    "scanAgentOutput": true,
+    "scanTaskFile": true
+  },
+  "qualityGates": {
+    "typescript": "npx tsc -b --force",
+    "lint": "npm run lint",
+    "diffCheck": "git diff --check",
+    "buildPages": "npm run build:pages",
+    "buildWorker": "npm run build:worker",
+    "serverTests": "npm run test:server"
+  },
+  "logging": {
+    "keepLogDays": 30,
+    "keepFailureDays": 60,
+    "captureStdoutAndStderr": true
+  }
+}

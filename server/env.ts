@@ -59,7 +59,45 @@ export type Env = {
    * production, so the bypass cannot be enabled by accident.
    */
   DEV_AUTH_BYPASS_SECRET?: string;
+
+  /**
+   * Retention window for `admin_audit_log`, in days. Not a secret: it
+   * is a storage bound read from `wrangler.jsonc` `vars`, never a
+   * credential. A missing, zero, negative or non-numeric value falls
+   * back to DEFAULT_AUDIT_RETENTION_DAYS at read time.
+   */
+  AUDIT_RETENTION_DAYS: string;
 };
+
+/**
+ * Safe fallback retention window for `admin_audit_log`, in days. Used
+ * when AUDIT_RETENTION_DAYS is missing, zero, negative or non-numeric,
+ * so a bad configuration can never delete everything or nothing.
+ */
+export const DEFAULT_AUDIT_RETENTION_DAYS = 90;
+
+/**
+ * Parse the audit-log retention window in days.
+ *
+ * A missing, empty, zero, negative or non-numeric value yields
+ * DEFAULT_AUDIT_RETENTION_DAYS rather than deleting everything or
+ * nothing. Any positive finite number is accepted as-is.
+ */
+export function parseAuditRetentionDays(
+  raw: string | undefined,
+): number {
+  if (typeof raw !== "string" || raw.trim() === "") {
+    return DEFAULT_AUDIT_RETENTION_DAYS;
+  }
+
+  const parsed = Number(raw);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_AUDIT_RETENTION_DAYS;
+  }
+
+  return parsed;
+}
 
 /** True only for an explicit non-production deployment. */
 export function isDevelopment(env: Env): boolean {

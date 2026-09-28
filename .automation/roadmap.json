@@ -1,0 +1,480 @@
+{
+  "schemaVersion": 1,
+  "project": "queryvanta",
+  "approvedInput": "docs/qa/phase-4-abuse-audit.md",
+  "approvalNote": "Phase 4 task scope is derived from the approved abuse/free-tier audit. Do not invent requirements that contradict it. Phase 5 is structural planning only and must not begin until Phase 4 review task 4.2H passes.",
+  "phases": [
+    {
+      "id": "phase-4",
+      "title": "Free-tier and abuse hardening",
+      "tasks": [
+        {
+          "id": "4.2A",
+          "title": "Move housekeeping off the request path and add scheduled retention",
+          "file": "4.2A-housekeeping-cron.md",
+          "autoCommit": false,
+          "autoPush": false,
+          "dependsOn": [],
+          "auditSections": [
+            "D (V-03, V-09, V-13)",
+            "F",
+            "J",
+            "K step 1"
+          ],
+          "verification": [
+            {
+              "name": "typescript",
+              "command": "npx tsc -b --force"
+            },
+            {
+              "name": "server-tests",
+              "command": "npm run test:server"
+            },
+            {
+              "name": "lint",
+              "command": "npm run lint"
+            },
+            {
+              "name": "diff-check",
+              "command": "git diff --check"
+            }
+          ]
+        },
+        {
+          "id": "4.2B",
+          "title": "Rate limiting and unauthenticated audit-write protection",
+          "file": "4.2B-rate-limiting-audit-throttle.md",
+          "autoCommit": false,
+          "autoPush": false,
+          "dependsOn": [
+            "4.2A"
+          ],
+          "auditSections": [
+            "D (V-02, V-10)",
+            "H",
+            "J",
+            "K step 2"
+          ],
+          "verification": [
+            {
+              "name": "typescript",
+              "command": "npx tsc -b --force"
+            },
+            {
+              "name": "server-tests",
+              "command": "npm run test:server"
+            },
+            {
+              "name": "lint",
+              "command": "npm run lint"
+            },
+            {
+              "name": "diff-check",
+              "command": "git diff --check"
+            }
+          ]
+        },
+        {
+          "id": "4.2C",
+          "title": "OAuth-start abuse protection",
+          "file": "4.2C-oauth-start-abuse-protection.md",
+          "autoCommit": false,
+          "autoPush": false,
+          "dependsOn": [
+            "4.2B"
+          ],
+          "auditSections": [
+            "D (V-01)",
+            "H",
+            "K step 3"
+          ],
+          "verification": [
+            {
+              "name": "typescript",
+              "command": "npx tsc -b --force"
+            },
+            {
+              "name": "server-tests",
+              "command": "npm run test:server"
+            },
+            {
+              "name": "lint",
+              "command": "npm run lint"
+            },
+            {
+              "name": "diff-check",
+              "command": "git diff --check"
+            }
+          ]
+        },
+        {
+          "id": "4.2D",
+          "title": "Public API caching and ETag",
+          "file": "4.2D-public-api-caching-etag.md",
+          "autoCommit": false,
+          "autoPush": false,
+          "dependsOn": [
+            "4.2C"
+          ],
+          "auditSections": [
+            "D (V-05)",
+            "G",
+            "J",
+            "K step 4"
+          ],
+          "verification": [
+            {
+              "name": "typescript",
+              "command": "npx tsc -b --force"
+            },
+            {
+              "name": "server-tests",
+              "command": "npm run test:server"
+            },
+            {
+              "name": "lint",
+              "command": "npm run lint"
+            },
+            {
+              "name": "diff-check",
+              "command": "git diff --check"
+            }
+          ]
+        },
+        {
+          "id": "4.2E",
+          "title": "Public query and filter bounds",
+          "file": "4.2E-public-query-bounds.md",
+          "autoCommit": false,
+          "autoPush": false,
+          "dependsOn": [
+            "4.2D"
+          ],
+          "auditSections": [
+            "D (V-06, V-12)",
+            "F",
+            "K step 5"
+          ],
+          "verification": [
+            {
+              "name": "typescript",
+              "command": "npx tsc -b --force"
+            },
+            {
+              "name": "server-tests",
+              "command": "npm run test:server"
+            },
+            {
+              "name": "lint",
+              "command": "npm run lint"
+            },
+            {
+              "name": "diff-check",
+              "command": "git diff --check"
+            }
+          ]
+        },
+        {
+          "id": "4.2F",
+          "title": "Bulk import batching",
+          "file": "4.2F-bulk-import-batching.md",
+          "autoCommit": false,
+          "autoPush": false,
+          "dependsOn": [
+            "4.2E"
+          ],
+          "auditSections": [
+            "D (V-08)",
+            "I",
+            "K step 6"
+          ],
+          "verification": [
+            {
+              "name": "typescript",
+              "command": "npx tsc -b --force"
+            },
+            {
+              "name": "server-tests",
+              "command": "npm run test:server"
+            },
+            {
+              "name": "lint",
+              "command": "npm run lint"
+            },
+            {
+              "name": "diff-check",
+              "command": "git diff --check"
+            }
+          ]
+        },
+        {
+          "id": "4.2G",
+          "title": "Session and catalog request amplification reduction",
+          "file": "4.2G-session-catalog-amplification.md",
+          "autoCommit": false,
+          "autoPush": false,
+          "dependsOn": [
+            "4.2F"
+          ],
+          "auditSections": [
+            "D (V-04, V-07)",
+            "I",
+            "K step 7"
+          ],
+          "verification": [
+            {
+              "name": "typescript",
+              "command": "npx tsc -b --force"
+            },
+            {
+              "name": "server-tests",
+              "command": "npm run test:server"
+            },
+            {
+              "name": "lint",
+              "command": "npm run lint"
+            },
+            {
+              "name": "diff-check",
+              "command": "git diff --check"
+            }
+          ]
+        },
+        {
+          "id": "4.2H",
+          "title": "Full Phase 4 regression, security and free-tier review",
+          "file": "4.2H-phase-4-review.md",
+          "autoCommit": false,
+          "autoPush": false,
+          "dependsOn": [
+            "4.2G"
+          ],
+          "auditSections": [
+            "All",
+            "M"
+          ],
+          "verification": [
+            {
+              "name": "typescript",
+              "command": "npx tsc -b --force"
+            },
+            {
+              "name": "server-tests",
+              "command": "npm run test:server"
+            },
+            {
+              "name": "build-pages",
+              "command": "npm run build:pages"
+            },
+            {
+              "name": "verify-pages",
+              "command": "npm run verify:build pages"
+            },
+            {
+              "name": "build-worker",
+              "command": "npm run build:worker"
+            },
+            {
+              "name": "verify-worker",
+              "command": "npm run verify:worker"
+            },
+            {
+              "name": "lint",
+              "command": "npm run lint"
+            },
+            {
+              "name": "diff-check",
+              "command": "git diff --check"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-5",
+      "title": "Analytics",
+      "blockedBy": [
+        "4.2H"
+      ],
+      "tasks": [
+        {
+          "id": "5.1",
+          "title": "Analytics architecture",
+          "file": "5.1-analytics-architecture.md",
+          "autoCommit": false,
+          "autoPush": false,
+          "dependsOn": [
+            "4.2H"
+          ],
+          "verification": [
+            {
+              "name": "typescript",
+              "command": "npx tsc -b --force"
+            },
+            {
+              "name": "lint",
+              "command": "npm run lint"
+            },
+            {
+              "name": "diff-check",
+              "command": "git diff --check"
+            }
+          ]
+        },
+        {
+          "id": "5.2",
+          "title": "Anonymous product event collection",
+          "file": "5.2-anonymous-event-collection.md",
+          "autoCommit": false,
+          "autoPush": false,
+          "dependsOn": [
+            "5.1"
+          ],
+          "verification": [
+            {
+              "name": "typescript",
+              "command": "npx tsc -b --force"
+            },
+            {
+              "name": "server-tests",
+              "command": "npm run test:server"
+            },
+            {
+              "name": "lint",
+              "command": "npm run lint"
+            },
+            {
+              "name": "diff-check",
+              "command": "git diff --check"
+            }
+          ]
+        },
+        {
+          "id": "5.3",
+          "title": "Admin analytics page",
+          "file": "5.3-admin-analytics-page.md",
+          "autoCommit": false,
+          "autoPush": false,
+          "dependsOn": [
+            "5.2"
+          ],
+          "verification": [
+            {
+              "name": "typescript",
+              "command": "npx tsc -b --force"
+            },
+            {
+              "name": "server-tests",
+              "command": "npm run test:server"
+            },
+            {
+              "name": "lint",
+              "command": "npm run lint"
+            },
+            {
+              "name": "diff-check",
+              "command": "git diff --check"
+            }
+          ]
+        },
+        {
+          "id": "5.4",
+          "title": "Privacy and security review",
+          "file": "5.4-privacy-security-review.md",
+          "autoCommit": false,
+          "autoPush": false,
+          "dependsOn": [
+            "5.3"
+          ],
+          "verification": [
+            {
+              "name": "typescript",
+              "command": "npx tsc -b --force"
+            },
+            {
+              "name": "server-tests",
+              "command": "npm run test:server"
+            },
+            {
+              "name": "lint",
+              "command": "npm run lint"
+            },
+            {
+              "name": "diff-check",
+              "command": "git diff --check"
+            }
+          ]
+        },
+        {
+          "id": "5.5",
+          "title": "Analytics production verification",
+          "file": "5.5-analytics-production-verification.md",
+          "autoCommit": false,
+          "autoPush": false,
+          "dependsOn": [
+            "5.4"
+          ],
+          "verification": [
+            {
+              "name": "typescript",
+              "command": "npx tsc -b --force"
+            },
+            {
+              "name": "lint",
+              "command": "npm run lint"
+            },
+            {
+              "name": "diff-check",
+              "command": "git diff --check"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "final",
+      "title": "Final release and security audit",
+      "blockedBy": [
+        "5.5"
+      ],
+      "tasks": [
+        {
+          "id": "FINAL",
+          "title": "Final release and security audit",
+          "file": "FINAL-final-release-audit.md",
+          "autoCommit": false,
+          "autoPush": false,
+          "dependsOn": [
+            "5.5"
+          ],
+          "verification": [
+            {
+              "name": "typescript",
+              "command": "npx tsc -b --force"
+            },
+            {
+              "name": "server-tests",
+              "command": "npm run test:server"
+            },
+            {
+              "name": "build-pages",
+              "command": "npm run build:pages"
+            },
+            {
+              "name": "verify-pages",
+              "command": "npm run verify:build pages"
+            },
+            {
+              "name": "lint",
+              "command": "npm run lint"
+            },
+            {
+              "name": "diff-check",
+              "command": "git diff --check"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

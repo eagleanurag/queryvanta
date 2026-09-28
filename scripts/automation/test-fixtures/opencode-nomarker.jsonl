@@ -1,0 +1,3 @@
+{"type":"step-start","id":"stp_01","sessionID":"ses_autonomous_nomarker_fixture"}
+{"type":"text","sessionID":"ses_autonomous_nomarker_fixture","part":{"type":"text","text":"I did some work and then the session ended unexpectedly."}}
+{"type":"text","sessionID":"ses_autonomous_nomarker_fixture","part":{"type":"text","text":"No status marker was ever emitted."}}

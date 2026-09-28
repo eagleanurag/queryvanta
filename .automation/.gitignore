@@ -1,0 +1,15 @@
+# Keep the automation directory structure, but never commit generated output.
+#
+# Log and failure captures can contain full agent transcripts, command output
+# and repository state. They are evidence for debugging, not source.
+logs/*
+!logs/.gitkeep
+failures/*
+!failures/.gitkeep
+
+# Single-instance lock. Its presence is transient; committing it would let a
+# stale lock travel between machines.
+.runner.lock
+
+# Atomic state write temporary file.
+.state.json.tmp

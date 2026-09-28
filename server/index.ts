@@ -11,6 +11,7 @@
  */
 
 import {
+  purgeAuditLog,
   recordAudit,
   listAudit,
   type AuditEntry,
@@ -18,6 +19,7 @@ import {
 import {
   isDevelopment,
   parseAdminGitHubIds,
+  parseAuditRetentionDays,
   type Env,
 } from "./env.ts";
 import {
@@ -874,6 +876,10 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<Response> {
+    // `ctx` is unused on the request path: housekeeping now runs from
+    // the scheduled handler, so there is nothing to waitUntil here.
+    void ctx;
+
     const url = new URL(request.url);
     const pathname = url.pathname.replace(/\/+$/, "") || "/";
 
@@ -969,16 +975,46 @@ export default {
       }
 
       return fail(apiError);
-    } finally {
-      // Opportunistic housekeeping; never blocks the response.
-      if (pathname.startsWith("/api/auth/session")) {
-        ctx.waitUntil(
-          Promise.allSettled([
-            purgeExpiredSessions(env.DB),
-            purgeExpiredOAuthTransactions(env.DB),
-          ]),
-        );
-      }
     }
+  },
+
+  /**
+   * Scheduled housekeeping, driven by the Worker cron trigger.
+   *
+   * Runs the session and OAuth-transaction purges plus the audit-log
+   * retention delete. Each purge is isolated with Promise.allSettled so
+   * one failure cannot prevent the others; failures are logged, never
+   * thrown. This replaces the request-path housekeeping that used to
+   * run on /api/auth/session.
+   */
+  async scheduled(
+    event: ScheduledEvent,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    void event;
+    void ctx;
+
+    const retentionDays = parseAuditRetentionDays(
+      env.AUDIT_RETENTION_DAYS,
+    );
+
+    const results = await Promise.allSettled([
+      purgeExpiredSessions(env.DB),
+      purgeExpiredOAuthTransactions(env.DB),
+      purgeAuditLog(env.DB, retentionDays),
+    ]);
+
+    const failed = results.filter(
+      (result) => result.status === "rejected",
+    );
+
+    for (const failure of failed) {
+      console.error("housekeeping purge failed:", failure.reason);
+    }
+
+    console.log(
+      `housekeeping complete: ${results.length - failed.length}/${results.length} purges succeeded`,
+    );
   },
 };
