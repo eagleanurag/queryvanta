@@ -18,6 +18,47 @@
  * benefit and risks double counting, and there is no surfaced error state,
  * because a product analytics failure is not the user's problem.
  *
+ * ASK WHETHER THERE IS A BACKEND BEFORE POSTING
+ * ---------------------------------------------
+ * The GitHub Pages deployment is static and serves no `/api/*`. An
+ * unconditional POST therefore fails on every flush there, and a failed
+ * request is not silent: the browser logs a console error for it, so the
+ * collector was filling every visitor's console and failing the
+ * repository's own `expectNoAppErrors` browser gate.
+ *
+ * Rather than invent a second liveness check, this asks `probeApi()`
+ * from `./adminApi` - the function that already answers "is a backend
+ * deployed here?". Its `no_backend` result is the established signal:
+ * `readEnvelope` treats a non-JSON response as "no backend", which is
+ * exactly what a static host returns.
+ *
+ * THE PROBE CANNOT BE THE FIRST THING THAT HAPPENS
+ * -----------------------------------------------
+ * A probe is itself a request to `/api/health`, and a request to a path
+ * a static host does not serve is NOT silent: the browser logs a
+ * console error for it. So probing to discover "there is no API" costs
+ * exactly the console error this module exists to stop. Measuring it on
+ * the dev server: `GET api/health` returns 404 to a `fetch` (Vite only
+ * applies its SPA fallback to requests that accept HTML), so the probe
+ * would trade one analytics 404 for one probe 404.
+ *
+ * The answer is therefore read from the build target instead, which is
+ * a fact already available with no request at all:
+ * `config/deploy-targets.ts` records `hasApi` per target and the build
+ * forwards it as `VITE_QV_API_AVAILABLE`. On a Pages build the collector
+ * never probes and never posts, so a static deployment issues ZERO
+ * `/api/*` requests and its console stays clean.
+ *
+ * `hasApi: true` is not treated as proof of health. On a Worker build
+ * the collector still confirms the API once at runtime through
+ * `probeApi()`, which is also what catches a misconfigured deployment.
+ *
+ * The runtime answer is resolved AT MOST ONCE per page load, on the
+ * first event, and every concurrent caller shares that one in-flight
+ * request. There is no probe per event, no retry, and no re-probing
+ * after a negative answer: a deployment's backend does not appear while
+ * a tab is open.
+ *
  * THE SENDER IS THE ONLY NETWORK CALLER
  * -------------------------------------
  * Nothing here reads the DOM, inspects a question, touches a session cookie
@@ -26,6 +67,8 @@
  * position achievable from the client side rather than merely enforced on
  * the server.
  */
+
+import { probeApi } from "./adminApi";
 
 /** A single queued event, in the wire shape the ingest endpoint accepts. */
 type QueuedEvent = {
@@ -79,6 +122,91 @@ let queue: QueuedEvent[] = [];
 let timer: number | null = null;
 let started = false;
 
+/**
+ * Whether the build expects an API to exist.
+ *
+ * `undefined` means the build did not say, in which case the collector
+ * falls back to probing once at runtime rather than assuming either way.
+ */
+function buildExpectsApi(): boolean | undefined {
+  const raw = import.meta.env.VITE_QV_API_AVAILABLE;
+
+  if (raw === "true") {
+    return true;
+  }
+
+  if (raw === "false") {
+    return false;
+  }
+
+  return undefined;
+}
+
+/**
+ * The build-time starting point.
+ *
+ * A build that says "no API here" starts already suppressed, which is
+ * what keeps a static deployment at zero `/api/*` requests. A build that
+ * says "an API should be here" starts UNDETERMINED rather than
+ * confirmed, so the runtime probe still runs exactly once and can catch
+ * a misconfigured or half-deployed origin.
+ */
+const INITIAL_AVAILABILITY: boolean | null =
+  buildExpectsApi() === false ? false : null;
+
+/**
+ * Whether a backend exists on this origin.
+ *
+ * `null` means "not determined yet". It is a tri-state rather than a
+ * boolean so that a negative answer can suppress permanently while an
+ * unanswered question still allows exactly one probe.
+ */
+let apiAvailable: boolean | null = INITIAL_AVAILABILITY;
+
+/**
+ * The single in-flight probe.
+ *
+ * Held so that N events queued before the probe resolves share one
+ * request instead of producing N. It is deliberately never cleared: a
+ * deployment that has no backend does not grow one while the tab is
+ * open, so re-probing could only ever re-confirm `false`.
+ */
+let probeInFlight: Promise<boolean> | null = null;
+
+/**
+ * Resolve API availability once, and cache the answer.
+ *
+ * Safe to call concurrently and repeatedly. Callers that arrive after the
+ * answer is known get it synchronously-equivalent; callers that arrive
+ * during the probe share its promise. Any throw - including a thrown
+ * `probeApi()` - is treated as "no backend", because a probe that cannot
+ * complete is not evidence that a backend exists.
+ */
+function ensureApiAvailability(): Promise<boolean> {
+  if (apiAvailable !== null) {
+    return Promise.resolve(apiAvailable);
+  }
+
+  if (probeInFlight === null) {
+    probeInFlight = (async () => {
+      try {
+        apiAvailable = await probeApi();
+      } catch {
+        apiAvailable = false;
+      }
+
+      return apiAvailable;
+    })();
+  }
+
+  return probeInFlight;
+}
+
+/** Drop the queue and stop, because there is nowhere to send it. */
+function suppress(): void {
+  queue = [];
+}
+
 function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -110,6 +238,13 @@ export function trackEvent(event: AnalyticsEvent): void {
       return;
     }
 
+    // Established as unavailable: do not even queue. Queueing would grow
+    // a buffer that can never be sent, and the caller gets the same
+    // observable behaviour either way.
+    if (apiAvailable === false) {
+      return;
+    }
+
     const { name, ...rest } = event;
 
     const properties: Record<string, string> = {};
@@ -132,6 +267,12 @@ export function trackEvent(event: AnalyticsEvent): void {
 
     if (queue.length > MAX_QUEUE) {
       queue = queue.slice(queue.length - MAX_QUEUE);
+    }
+
+    // Ask once, on the first event, so the answer is normally already
+    // cached by the time the flush interval or a page teardown arrives.
+    if (apiAvailable === null) {
+      void ensureApiAvailability();
     }
 
     // A tab that is being hidden is the most likely moment to lose the
@@ -280,6 +421,25 @@ export async function flush(): Promise<void> {
       return;
     }
 
+    // Already known: there is nowhere to send this.
+    if (apiAvailable === false) {
+      suppress();
+      return;
+    }
+
+    // Not known yet. This path is asynchronous, so it can wait for the
+    // single shared probe rather than posting into a 404. That is what
+    // keeps a static deployment down to one request instead of one per
+    // flush interval.
+    if (apiAvailable === null) {
+      await ensureApiAvailability();
+
+      if (apiAvailable === false) {
+        suppress();
+        return;
+      }
+    }
+
     while (queue.length > 0) {
       const batch = takeBatch();
 
@@ -307,6 +467,17 @@ export async function flush(): Promise<void> {
 function flushOnUnload(): void {
   try {
     if (!isBrowser()) {
+      return;
+    }
+
+    // Unlike `flush`, this path cannot await a probe, so it must not post
+    // blind. Both a known-negative answer and an unanswered question drop
+    // the batch: the page is being torn down either way, and this module's
+    // own rule is that a non-critical signal is dropped rather than
+    // retried. In practice the probe has already resolved, because it is
+    // fired on the first event and a teardown needs a user gesture.
+    if (apiAvailable !== true) {
+      suppress();
       return;
     }
 
@@ -383,4 +554,28 @@ export function pendingEventCount(): number {
 /** Test seam: drop everything queued. */
 export function resetAnalyticsQueue(): void {
   queue = [];
+}
+
+/**
+ * Test seam: the cached API-availability answer.
+ *
+ * `null` means no probe has completed yet.
+ */
+export function apiAvailability(): boolean | null {
+  return apiAvailable;
+}
+
+/**
+ * Test seam: forget the probe so a later test can determine
+ * availability again.
+ *
+ * Without this the answer is cached for the lifetime of the module,
+ * which is the production behaviour and would make a second test in the
+ * same page load inherit the first one's verdict. It restores the
+ * build-time starting point rather than `null`, so a Pages build stays
+ * suppressed even after a reset.
+ */
+export function resetApiAvailability(): void {
+  apiAvailable = INITIAL_AVAILABILITY;
+  probeInFlight = null;
 }

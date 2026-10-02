@@ -38,15 +38,20 @@ const env = {
   QV_TARGET: target.name,
   QV_BASE: target.base,
   QV_SITE_URL: target.siteUrl,
-  // Vite only exposes vars prefixed with VITE_ to the client. This
-  // carries a public site URL only, never a credential.
+  // Vite only exposes vars prefixed with VITE_ to the client. These
+  // carry a public site URL and a build-shape boolean only, never a
+  // credential.
   VITE_QV_SITE_URL: target.siteUrl,
+  // Lets the analytics collector know, before it makes any request,
+  // whether this deployment has an API to talk to.
+  VITE_QV_API_AVAILABLE: String(target.hasApi),
 };
 
 console.log(
   `Build target: ${target.name} (${target.label})\n` +
     `  base    : ${target.base}\n` +
-    `  site URL: ${target.siteUrl}`,
+    `  site URL: ${target.siteUrl}\n` +
+    `  has API : ${target.hasApi}`,
 );
 
 function run(command, args, label) {

@@ -1,7 +1,8 @@
 /**
  * QueryVanta deployment targets.
  *
- * SINGLE SOURCE OF TRUTH for the base path and the public site URL.
+ * SINGLE SOURCE OF TRUTH for the base path, the public site URL, and
+ * whether a server-side API exists on the target at all.
  *
  *   GitHub Pages  ->  /queryvanta/   (existing fallback, CI default)
  *   Cloudflare    ->  /             (Worker serves app + API on one origin)
@@ -14,6 +15,7 @@
  *   src/lib/seo.ts               -> canonical + Open Graph URLs
  *   scripts/verify-build.mjs     -> post-build assertions
  *   scripts/predeploy-worker.mjs -> pre-deploy guard
+ *   src/lib/analytics.ts         -> whether an ingest endpoint is reachable
  *
  * Written in erasable TypeScript only (enforced by the
  * `erasableSyntaxOnly` compiler option) so it can be imported both
@@ -27,6 +29,22 @@ export type DeployTarget = {
   label: string;
   base: string;
   siteUrl: string;
+  /**
+   * Whether this target serves the `/api/*` family.
+   *
+   * A build-time fact, not a runtime guess. GitHub Pages is a static
+   * host with no Worker, so EVERY `/api/*` path there answers 404 or
+   * with HTML. That matters because a failed request is not silent: the
+   * browser logs a console error for each one. A client cannot probe its
+   * way to a negative answer without paying at least one such error, so
+   * the only way to keep a static deployment's console clean is to know
+   * before the first request that there is nothing to talk to.
+   *
+   * `worker: true` is not a promise that the deployment is healthy. The
+   * client still confirms it at runtime, once, through the existing
+   * `probeApi()`.
+   */
+  hasApi: boolean;
 };
 
 export const DEPLOY_TARGETS: Record<DeployTargetName, DeployTarget> = {
@@ -35,12 +53,14 @@ export const DEPLOY_TARGETS: Record<DeployTargetName, DeployTarget> = {
     label: "GitHub Pages",
     base: "/queryvanta/",
     siteUrl: "https://eagleanurag.github.io/queryvanta",
+    hasApi: false,
   },
   worker: {
     name: "worker",
     label: "Cloudflare Worker",
     base: "/",
     siteUrl: "https://queryvanta.queryvanta.workers.dev",
+    hasApi: true,
   },
 };
 

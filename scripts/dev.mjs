@@ -57,12 +57,14 @@ const env = {
   QV_BASE: target.base,
   QV_SITE_URL: target.siteUrl,
   VITE_QV_SITE_URL: target.siteUrl,
+  VITE_QV_API_AVAILABLE: String(target.hasApi),
 };
 
 console.log(
   `Dev target: ${target.name} (${target.label})\n` +
     `  base    : ${target.base}\n` +
-    `  site URL: ${target.siteUrl}`,
+    `  site URL: ${target.siteUrl}\n` +
+    `  has API : ${target.hasApi}`,
 );
 
 const child = spawn(

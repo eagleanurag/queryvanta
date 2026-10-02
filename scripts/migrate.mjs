@@ -14,9 +14,18 @@
  * instead of naming them. Adding `0003_*.sql` later requires no edit here.
  *
  * Usage:
- *   node scripts/migrate.mjs                    # local, default database
- *   node scripts/migrate.mjs --remote           # remote deployment
+ *   npm run d1:migrate                          # REMOTE: the deployed database
+ *   node scripts/migrate.mjs --remote           # same as above, made explicit
+ *   npm run d1:migrate:local                    # LOCAL only, throwaway
  *   node scripts/migrate.mjs --local --persist-to <dir>
+ *
+ * DEFAULT TARGETS PRODUCTION
+ * --------------------------
+ * With no --local flag this script passes --remote to wrangler, so a bare
+ * invocation applies migrations to the DEPLOYED database. That is
+ * deliberate, and it is what the deploy runbook in README.md relies on,
+ * but it also means the no-argument form is NOT a dry run. Pass --local
+ * whenever you intend a throwaway database.
  *
  * Every statement in every migration is written to be idempotent
  * (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`), so running
@@ -92,8 +101,9 @@ export function applyMigrations({ local, persistTo, database }) {
     "d1",
     "execute",
     database,
-    // `--remote` and `--local` are mutually exclusive in wrangler; the
-    // remote flag is the default, so it is only added explicitly for local.
+    // `--remote` and `--local` are mutually exclusive in wrangler, so
+    // exactly one is always passed. The remote branch is the default,
+    // which is why `--local` must be requested explicitly.
     ...(local ? ["--local"] : ["--remote"]),
     ...(persistTo
       ? ["--persist-to", persistTo]
