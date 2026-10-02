@@ -1,4 +1,7 @@
-import { StrictMode, Suspense } from "react";
+import {
+  StrictMode,
+  Suspense,
+} from "react";
 import { createRoot } from "react-dom/client";
 import {
   BrowserRouter,
@@ -9,10 +12,12 @@ import {
 import App from "./App";
 import AdminGate from "./components/AdminGate";
 import ErrorBoundary from "./components/ErrorBoundary";
+import RouteAnalytics from "./components/RouteAnalytics";
 import NotFoundPage from "./pages/NotFoundPage";
 import {
   AdminLoginPage,
   AdminPage,
+  AdminAnalyticsPage,
   InterviewPage,
   LandingPage,
   LearnPage,
@@ -26,13 +31,25 @@ import {
   RouteLoadingFallback,
 } from "./routes";
 
+import { startAnalytics } from "./lib/analytics";
+
 import "./index.css";
+
+// Anonymous product analytics (task 5.2).
+//
+// Started once at the app entry point, before render, so the flush timer
+// and the lifecycle listeners are installed even for a session that never
+// triggers a route change. `startAnalytics` is idempotent, so a dev
+// hot-reload or a StrictMode double-mount cannot install them twice and
+// double-count. Nothing it does can block or fail the render below.
+startAnalytics();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter
       basename={import.meta.env.BASE_URL}
     >
+      <RouteAnalytics />
       <ErrorBoundary>
         <Suspense
           fallback={<RouteLoadingFallback />}
@@ -59,6 +76,15 @@ createRoot(document.getElementById("root")!).render(
               element={
                 <AdminGate>
                   <AdminPage />
+                </AdminGate>
+              }
+            />
+
+            <Route
+              path="/admin/analytics"
+              element={
+                <AdminGate>
+                  <AdminAnalyticsPage />
                 </AdminGate>
               }
             />

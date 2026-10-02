@@ -22,6 +22,7 @@ import type {
   Difficulty,
   QuestionType,
 } from "../data/questions";
+import { trackEvent } from "../lib/analytics";
 import {
   getSolvedQuestionIds,
   PROGRESS_EVENT,
@@ -232,6 +233,33 @@ function InterviewPage() {
             )
           ? "PySpark"
           : "Mixed";
+
+    // Anonymous product analytics (task 5.2).
+    //
+    // Recorded before the navigate() call so the event is queued even if
+    // the navigation is intercepted or fails. `pool` is already narrowed to
+    // the interview's own question set, so its engine is a real value from
+    // the server's allow-list; the "Mixed" case is deliberately NOT sent,
+    // because a mixed interview has no single engine and inventing one
+    // would misreport it.
+    const interviewEngine = pool.every(
+      (question) =>
+        question.questionType === "SQL",
+    )
+      ? "SQL"
+      : pool.every(
+            (question) =>
+              question.questionType === "PySpark",
+          )
+        ? "PySpark"
+        : null;
+
+    if (interviewEngine !== null) {
+      trackEvent({
+        name: "interview_started",
+        engine: interviewEngine,
+      });
+    }
 
     const launched = launchPracticeSession(navigate, {
       questionIds: selectedIds,

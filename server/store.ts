@@ -139,6 +139,23 @@ function toAdminQuestion(row: QuestionRow): AdminQuestion {
 const PUBLIC_PREDICATE =
   "enabled = 1 AND published = 1 AND deleted_at IS NULL";
 
+/**
+ * Public list page size (audit finding V-06).
+ *
+ * The catalog is 35 built-in questions plus whatever an administrator
+ * adds. 100 is comfortably above the built-in catalog, so the common
+ * case is never truncated, while still bounding both the row read and
+ * the response size. The response reports `total` separately so a client
+ * is never misled about how much exists.
+ */
+export const PUBLIC_LIST_LIMIT = 100;
+
+export type PublicQuestionPage = {
+  questions: PublicQuestion[];
+  /** Total matching rows, independent of the page limit. */
+  total: number;
+};
+
 export async function listPublicQuestions(
   db: D1Database,
   filters: {
@@ -146,7 +163,8 @@ export async function listPublicQuestions(
     category?: string | null;
     difficulty?: string | null;
   } = {},
-): Promise<PublicQuestion[]> {
+  limit: number = PUBLIC_LIST_LIMIT,
+): Promise<PublicQuestionPage> {
   const conditions = [PUBLIC_PREDICATE];
   const bindings: string[] = [];
 
@@ -181,12 +199,78 @@ export async function listPublicQuestions(
     .prepare(
       `SELECT * FROM questions
         WHERE ${conditions.join(" AND ")}
-        ORDER BY category ASC, title ASC`,
+        ORDER BY category ASC, title ASC
+        LIMIT ?`,
     )
-    .bind(...bindings)
+    .bind(...bindings, limit)
     .all<QuestionRow>();
 
-  return results.map(toPublicQuestion);
+  const total = await countPublicQuestions(
+    db,
+    filters,
+  );
+
+  return {
+    questions: results.map(toPublicQuestion),
+    total,
+  };
+}
+
+/**
+ * Total matching rows for the same filters.
+ *
+ * Counted separately from the page so the response can report how much
+ * exists in total even when the page is truncated. The existing
+ * `enabled/published/deleted_at` index set supports both statements, so
+ * this costs one cheap aggregate rather than a second full scan.
+ */
+async function countPublicQuestions(
+  db: D1Database,
+  filters: {
+    engine?: string | null;
+    category?: string | null;
+    difficulty?: string | null;
+  },
+): Promise<number> {
+  const conditions = [PUBLIC_PREDICATE];
+  const bindings: string[] = [];
+
+  if (
+    filters.engine !== null &&
+    filters.engine !== undefined &&
+    filters.engine !== "All"
+  ) {
+    conditions.push("question_type = ?");
+    bindings.push(filters.engine);
+  }
+
+  if (
+    filters.category !== null &&
+    filters.category !== undefined &&
+    filters.category !== "All"
+  ) {
+    conditions.push("category = ?");
+    bindings.push(filters.category);
+  }
+
+  if (
+    filters.difficulty !== null &&
+    filters.difficulty !== undefined &&
+    filters.difficulty !== "All"
+  ) {
+    conditions.push("difficulty = ?");
+    bindings.push(filters.difficulty);
+  }
+
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM questions
+        WHERE ${conditions.join(" AND ")}`,
+    )
+    .bind(...bindings)
+    .first<{ n: number }>();
+
+  return Number(row?.n ?? 0);
 }
 
 export async function getPublicQuestion(
@@ -538,6 +622,105 @@ export type ImportOutcome = {
   failures: { id: string; reason: string }[];
 };
 
+/**
+ * Maximum rows per multi-row INSERT.
+ *
+ * DERIVED FROM D1's real limit, not guessed: Cloudflare D1 allows 100
+ * bound parameters per statement. The questions INSERT binds 23
+ * parameters per row, so floor(100 / 23) = 4 rows fit in one statement
+ * (92 parameters). Five rows would need 115 and would be rejected.
+ */
+export const IMPORT_ROWS_PER_STATEMENT = 4;
+
+/**
+ * Maximum statements per `db.batch()` call.
+ *
+ * `db.batch()` sends everything in one round trip, but chunking the batch
+ * keeps peak memory bounded for a full 500-item import and keeps any
+ * single failure attributable to a small, identifiable group of rows.
+ */
+export const IMPORT_STATEMENTS_PER_BATCH = 50;
+
+/**
+ * Bind values for one import row, in `IMPORT_COLUMNS` order.
+ */
+function importRowBindings(
+  input: QuestionInput,
+  actorGithubId: string,
+  now: string,
+): unknown[] {
+  return [
+    input.id,
+    input.title,
+    input.description,
+    input.difficulty,
+    input.questionType,
+    input.category,
+    JSON.stringify(input.languages),
+    JSON.stringify(input.tags),
+    JSON.stringify(input.companies),
+    input.database === null ? null : JSON.stringify(input.database),
+    input.starterCode,
+    input.hint,
+    input.solutionCode,
+    input.explanation,
+    input.validation === null
+      ? null
+      : JSON.stringify(input.validation),
+    1, // enabled
+    0, // published: an import is always a draft
+    "admin",
+    1,
+    now,
+    now,
+    actorGithubId,
+    actorGithubId,
+  ];
+}
+
+const IMPORT_COLUMN_LIST =
+  "id, title, description, difficulty, question_type, " +
+  "category, languages, tags, companies, database_json, " +
+  "starter_code, hint, solution_code, explanation, " +
+  "validation_json, enabled, published, deleted_at, " +
+  "source, version, created_at, updated_at, " +
+  "created_by, updated_by";
+
+function importRowPlaceholder(): string {
+  return (
+    "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, " +
+    "?, ?, NULL, ?, ?, ?, ?, ?, ?)"
+  );
+}
+
+/**
+ * Bulk import (audit finding V-08).
+ *
+ * WAS: a sequential loop performing three D1 round trips per item (an
+ * existence `SELECT`, an `INSERT`, and a read-back), so a 500-item
+ * import cost roughly 1,500 sequential round trips.
+ *
+ * NOW: a fixed number of round trips, independent of item count.
+ *   1. ONE batched existence query covering every submitted id at once,
+ *      replacing up to 500 individual `SELECT`s.
+ *   2. Multi-row `INSERT ... ON CONFLICT(id) DO NOTHING` statements of
+ *      four rows each, issued through `db.batch()`.
+ *
+ * WHY THE EXISTENCE QUERY SURVIVES
+ *
+ * The audit calls the old per-item pre-check redundant because the unique
+ * primary key already enforces the invariant. It does: nothing is ever
+ * overwritten, because `ON CONFLICT(id) DO NOTHING` refuses the write.
+ *
+ * What the primary key cannot do is TELL US WHICH id conflicted. The
+ * per-item `skipped`/`conflicts` outcome is part of this task's
+ * contract, and it cannot be reconstructed after the fact: a chunk that
+ * inserted two of three rows gives no indication which two, and an id
+ * inserted by this very request is indistinguishable from one that
+ * already existed. One batched lookup is what preserves exact, ordered,
+ * per-item reporting, and it is a single round trip rather than 500.
+ */
+
 export async function importQuestions(
   db: D1Database,
   inputs: QuestionInput[],
@@ -552,43 +735,175 @@ export async function importQuestions(
     failures: [],
   };
 
-  for (const input of inputs) {
-    const existing = await db
-      .prepare(`SELECT id FROM questions WHERE id = ?`)
-      .bind(input.id)
-      .first<{ id: string }>();
+  if (inputs.length === 0) {
+    return outcome;
+  }
 
-    if (existing !== null) {
+  const existing = await findExistingIds(
+    db,
+    inputs.map((input) => input.id),
+  );
+
+  // Decide each row's fate up front, in input order.
+  //
+  // An id repeated WITHIN this request conflicts on every occurrence after
+  // the first, which is exactly what the old sequential loop reported: the
+  // first occurrence created the row, the later ones found it present.
+  const seenInRequest = new Set<string>();
+  const toInsert: QuestionInput[] = [];
+
+  for (const input of inputs) {
+    if (existing.has(input.id) || seenInRequest.has(input.id)) {
       outcome.skipped += 1;
       outcome.conflicts += 1;
       continue;
     }
 
+    seenInRequest.add(input.id);
+    toInsert.push(input);
+  }
+
+  if (toInsert.length === 0) {
+    return outcome;
+  }
+
+  const statements: D1PreparedStatement[] = [];
+
+  for (
+    let index = 0;
+    index < toInsert.length;
+    index += IMPORT_ROWS_PER_STATEMENT
+  ) {
+    const chunk = toInsert.slice(
+      index,
+      index + IMPORT_ROWS_PER_STATEMENT,
+    );
+
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO questions (${IMPORT_COLUMN_LIST}) VALUES ` +
+            chunk.map(() => importRowPlaceholder()).join(", ") +
+            ` ON CONFLICT(id) DO NOTHING`,
+        )
+        .bind(
+          ...chunk.flatMap((input) =>
+            importRowBindings(input, actorGithubId, now),
+          ),
+        ),
+    );
+  }
+
+  let written = 0;
+
+  for (
+    let index = 0;
+    index < statements.length;
+    index += IMPORT_STATEMENTS_PER_BATCH
+  ) {
+    const slice = statements.slice(
+      index,
+      index + IMPORT_STATEMENTS_PER_BATCH,
+    );
+
     try {
-      const result = await createQuestion(
-        db,
-        { ...input, published: false, enabled: true },
-        actorGithubId,
-        now,
+      const batchResults = await db.batch(slice);
+
+      for (const result of batchResults) {
+        written += Number(result?.meta?.changes ?? 0);
+      }
+    } catch {
+      // A group failed. The reason is deliberately not surfaced here:
+      // falling back to per-row inserts reproduces the precise per-item
+      // failure that caused it, and reporting the batch-level error as
+      // well would double-count the same fault.
+      const group = toInsert.slice(
+        index,
+        index + IMPORT_STATEMENTS_PER_BATCH,
       );
 
-      if (result.status === "created") {
-        outcome.imported += 1;
-      } else {
-        outcome.skipped += 1;
-        outcome.conflicts += 1;
+      for (const input of group) {
+        const failure = await importSingleRow(
+          db,
+          input,
+          actorGithubId,
+          now,
+        );
+
+        if (failure === null) {
+          written += 1;
+        } else {
+          outcome.failed += 1;
+          outcome.failures.push({ id: input.id, reason: failure });
+        }
       }
-    } catch (error) {
-      outcome.failed += 1;
-      outcome.failures.push({
-        id: input.id,
-        reason:
-          error instanceof Error
-            ? error.message
-            : "unknown error",
-      });
     }
   }
 
+  outcome.imported = written;
+
   return outcome;
+}
+
+/**
+ * Which of the given ids already exist.
+ *
+ * Used only for the rare ambiguous chunk, so the common import path does
+ * no existence `SELECT` at all.
+ */
+async function findExistingIds(
+  db: D1Database,
+  ids: string[],
+): Promise<Set<string>> {
+  const found = new Set<string>();
+  const unique = [...new Set(ids)];
+
+  for (
+    let index = 0;
+    index < unique.length;
+    index += IMPORT_ROWS_PER_STATEMENT
+  ) {
+    const slice = unique.slice(index, index + IMPORT_ROWS_PER_STATEMENT);
+    const placeholders = slice.map(() => "?").join(", ");
+
+    const { results } = await db
+      .prepare(
+        `SELECT id FROM questions WHERE id IN (${placeholders})`,
+      )
+      .bind(...slice)
+      .all<{ id: string }>();
+
+    for (const row of results) {
+      found.add(row.id);
+    }
+  }
+
+  return found;
+}
+
+/**
+ * Per-row insert used only by the error fallback.
+ *
+ * Returns null on success, or the failure reason.
+ */
+async function importSingleRow(
+  db: D1Database,
+  input: QuestionInput,
+  actorGithubId: string,
+  now: string,
+): Promise<string | null> {
+  try {
+    await db
+      .prepare(
+        `INSERT INTO questions (${IMPORT_COLUMN_LIST}) VALUES ` +
+          `${importRowPlaceholder()} ON CONFLICT(id) DO NOTHING`,
+      )
+      .bind(...importRowBindings(input, actorGithubId, now))
+      .run();
+
+    return null;
+  }
+  catch (error) {
+    return error instanceof Error ? error.message : "unknown error";
+  }
 }

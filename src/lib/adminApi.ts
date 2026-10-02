@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Admin API client.
  *
  * Design rules enforced here:
@@ -297,6 +297,70 @@ export async function probeApi(): Promise<boolean> {
 }
 
 /* -------------------------------------------------------------------------- */
+/* analytics                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One aggregated daily counter, as returned by the admin analytics
+ * endpoint. Counts only: there is no per-event row, because the server
+ * stores aggregates rather than events (5.1 design, section 5).
+ */
+export type AdminAnalyticsCount = {
+  bucketDate: string;
+  eventName: string;
+  propKey: string;
+  propValue: string;
+  count: number;
+};
+
+/**
+ * Aggregated analytics for an administrator.
+ *
+ * `from` and `to` are the range the SERVER actually served, which is not
+ * necessarily the range that was requested: the endpoint clamps to at most
+ * 90 days and never reaches back past the retention window. The page shows
+ * these rather than its own inputs so that a clamped request is visible
+ * instead of silently misleading.
+ */
+export type AdminAnalytics = {
+  from: string;
+  to: string;
+  event: string | null;
+  rows: AdminAnalyticsCount[];
+  count: number;
+};
+
+export async function listAdminAnalytics(
+  params: {
+    from?: string;
+    to?: string;
+    event?: string | null;
+  } = {},
+): Promise<ApiResult<AdminAnalytics>> {
+  const query = new URLSearchParams();
+
+  if (params.from !== undefined) {
+    query.set("from", params.from);
+  }
+
+  if (params.to !== undefined) {
+    query.set("to", params.to);
+  }
+
+  if (
+    params.event !== undefined &&
+    params.event !== null
+  ) {
+    query.set("event", params.event);
+  }
+
+  const suffix = query.toString();
+
+  return request<AdminAnalytics>(
+    `api/admin/analytics${suffix === "" ? "" : `?${suffix}`}`,
+  );
+}
+
 /* questions                                                                   */
 /* -------------------------------------------------------------------------- */
 

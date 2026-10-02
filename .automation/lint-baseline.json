@@ -1,0 +1,49 @@
+{
+  "format": "queryvanta-lint-baseline",
+  "version": 1,
+  "description": "Pre-existing lint diagnostics allowed by the roadmap gate. Regenerate deliberately with: node scripts/lint-baseline.mjs --update",
+  "diagnostics": [
+    {
+      "file": "src/App.tsx",
+      "rule": "react-hooks/set-state-in-effect",
+      "severity": "error",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following: * Update external systems with the latest state from React. * Subscribe for updates from some external system, calling setState in a callback function when external state changes. Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect)."
+    },
+    {
+      "file": "src/App.tsx",
+      "rule": "react-hooks/set-state-in-effect",
+      "severity": "error",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following: * Update external systems with the latest state from React. * Subscribe for updates from some external system, calling setState in a callback function when external state changes. Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect)."
+    },
+    {
+      "file": "src/components/PracticeAnalytics.tsx",
+      "rule": "react-hooks/purity",
+      "severity": "error",
+      "message": "Error: Cannot call impure function during render `Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent)."
+    },
+    {
+      "file": "src/components/PracticeSetupModal.tsx",
+      "rule": "react-refresh/only-export-components",
+      "severity": "error",
+      "message": "Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components."
+    },
+    {
+      "file": "src/pages/QuestionPage.tsx",
+      "rule": "react-hooks/exhaustive-deps",
+      "severity": "warning",
+      "message": "React Hook useMemo has unnecessary dependencies: 'navListVersion' and 'questionId'. Either exclude them or remove the dependency array."
+    },
+    {
+      "file": "src/pages/QuestionPage.tsx",
+      "rule": "react-hooks/set-state-in-effect",
+      "severity": "error",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following: * Update external systems with the latest state from React. * Subscribe for updates from some external system, calling setState in a callback function when external state changes. Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect)."
+    },
+    {
+      "file": "src/pages/QuestionPage.tsx",
+      "rule": "react-hooks/exhaustive-deps",
+      "severity": "warning",
+      "message": "React Hook useEffect has missing dependencies: 'isPreview' and 'question'. Either include them or remove the dependency array."
+    }
+  ]
+}

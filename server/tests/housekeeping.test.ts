@@ -14,19 +14,18 @@
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { DatabaseSync } from "node:sqlite";
-import { readdirSync } from "node:fs";
-import { join } from "node:path";
 
 import {
   APP_ORIGIN,
   d1Command,
   mintSession,
-  persistPath,
+  openLocalSqlite,
   startWorker,
   stopWorker,
   TEST_ADMIN_ID,
+  toD1Handle,
   WORKER_ORIGIN,
+  type D1Handle,
 } from "./harness.ts";
 
 import worker from "../index.ts";
@@ -42,74 +41,15 @@ import {
 /* -------------------------------------------------------------------------- */
 
 /**
- * The slice of the D1 API the purge helpers and these tests use. It is
- * synchronous because `node:sqlite` is synchronous; the purge helpers
- * only `await` the result, which also resolves a non-Promise.
+ * The D1 handle used to invoke the Worker's `scheduled()` export directly
+ * against the same local database the harness booted.
+ *
+ * The shim itself (`toD1Handle` / `openLocalSqlite`) lives in the harness
+ * rather than here, so every suite that needs to call a store helper
+ * directly shares one implementation instead of growing its own.
  */
-type D1Handle = {
-  prepare(sql: string): {
-    bind(...params: unknown[]): {
-      run(): { meta: { changes: number } };
-      first<T>(): T | null;
-      all<T>(): { results: T[] };
-    };
-  };
-};
-
-/**
- * Adapt a `node:sqlite` connection to the small slice of the D1 API the
- * purge helpers use (`prepare`/`bind`/`run`/`first`/`all`). This lets a
- * test invoke the Worker's `scheduled()` export against the same local
- * D1 database the harness booted, without a second Worker.
- */
-function toD1(db: DatabaseSync): D1Handle {
-  return {
-    prepare(sql) {
-      const stmt = db.prepare(sql);
-
-      return {
-        bind(...params: unknown[]) {
-          const bound = params.map((param) =>
-            param === undefined ? null : param,
-          );
-
-          return {
-            run() {
-              const info = stmt.run(...(bound as never[]));
-              return { meta: { changes: Number(info.changes) } };
-            },
-            first<T>() {
-              return (stmt.get(...(bound as never[])) as T) ?? null;
-            },
-            all<T>() {
-              return { results: stmt.all(...(bound as never[])) as T[] };
-            },
-          };
-        },
-      };
-    },
-  };
-}
-
-function openSqlite(): DatabaseSync {
-  const dir = join(
-    persistPath as string,
-    "v3",
-    "d1",
-    "miniflare-D1DatabaseObject",
-  );
-  const file = readdirSync(dir).find(
-    (entry) =>
-      entry.endsWith(".sqlite") && entry !== "metadata.sqlite",
-  );
-
-  if (file === undefined) {
-    throw new Error(
-      `D1 sqlite file not found under ${dir}`,
-    );
-  }
-
-  return new DatabaseSync(join(dir, file));
+function d1Handle(): D1Handle {
+  return toD1Handle(openLocalSqlite());
 }
 
 /* -------------------------------------------------------------------------- */
@@ -174,6 +114,7 @@ function makeEnv(db: D1Database, retentionDays?: string): Env {
     ENVIRONMENT: "test",
     APP_ORIGIN,
     AUDIT_RETENTION_DAYS: retentionDays ?? "",
+    ANALYTICS_RETENTION_DAYS: "",
   };
 }
 
@@ -199,17 +140,14 @@ async function runScheduled(
 /* lifecycle                                                                   */
 /* -------------------------------------------------------------------------- */
 
-let sqlite: DatabaseSync;
 let d1Sync: D1Handle;
 
 before(async () => {
   await startWorker();
-  sqlite = openSqlite();
-  d1Sync = toD1(sqlite);
+  d1Sync = d1Handle();
 }, { timeout: 180_000 });
 
 after(async () => {
-  sqlite.close();
   await stopWorker();
 }, { timeout: 60_000 });
 
@@ -487,9 +425,27 @@ describe("SCHEDULED HANDLER", () => {
     // Must not throw despite the injected failure.
     await worker.scheduled(event, makeEnv(mockDb, "90"), ctx);
 
-    // The two healthy purges ran; only the injected one was skipped.
-    assert.equal(runs.length, 2, "both healthy purges must run");
-    assert.ok(runs.some((sql) => sql.includes("oauth_transactions")));
-    assert.ok(runs.some((sql) => sql.includes("admin_audit_log")));
+    // Every healthy purge ran; only the injected one was skipped. The
+    // count is derived from the known purge set rather than hard-coded, so
+    // adding a purge later does not silently make this assertion pass for
+    // the wrong reason.
+    const healthyPurges = [
+      "oauth_transactions",
+      "admin_audit_log",
+      "analytics_daily",
+    ];
+
+    assert.equal(
+      runs.length,
+      healthyPurges.length,
+      "every healthy purge must run",
+    );
+
+    for (const table of healthyPurges) {
+      assert.ok(
+        runs.some((sql) => sql.includes(table)),
+        `${table} purge must have run despite the injected failure`,
+      );
+    }
   });
 });

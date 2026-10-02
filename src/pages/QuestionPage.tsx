@@ -59,6 +59,10 @@ import SEO from "../components/SEO";
 import { createQuestionDatabase } from "../lib/pglite";
 import { PysparkClient } from "../lib/pysparkClient";
 import {
+  bucketCategory,
+  trackEvent,
+} from "../lib/analytics";
+import {
   filterQuestions,
   hasDiscoveryParams,
   parseFilterSearchParams,
@@ -489,6 +493,43 @@ function QuestionPage({
 
   const showPublicSeo = !hideChrome && !isPreview;
 
+  // Anonymous product analytics (task 5.2).
+  //
+  // Fires once per question the learner actually opens.
+  //
+  // The ref is what makes the broad `question` dependency safe: the
+  // question OBJECT is rebuilt on every catalog sync, so depending on its
+  // identity would re-run this effect constantly. Keying the guard on the
+  // id means one report per question actually opened, while still
+  // re-reporting correctly when the learner navigates to a different one.
+  //
+  // Deliberately skipped for the admin preview route: preview is an
+  // administrator looking at a draft, and counting it would mix a private
+  // reviewer's activity into the public "what gets read" signal. The
+  // question id is deliberately NOT sent - only the allow-listed engine,
+  // difficulty and category bucket, so a count answers "which topics get
+  // opened" without recording which question any individual visitor saw.
+  const reportedViewRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (isPreview || !question) {
+      return;
+    }
+
+    if (reportedViewRef.current === question.id) {
+      return;
+    }
+
+    reportedViewRef.current = question.id;
+
+    trackEvent({
+      name: "question_viewed",
+      engine: question.questionType,
+      difficulty: question.difficulty,
+      categoryBucket: bucketCategory(question.category),
+    });
+  }, [isPreview, question]);
+
   const breadcrumbItems = useMemo(() => {
     if (!question || !showPublicSeo) {
       return [];
@@ -895,6 +936,13 @@ function QuestionPage({
             executionTimeMs: elapsed,
           }),
         );
+
+        trackEvent({
+          name: "question_submitted",
+          engine: currentQuestion.questionType,
+          difficulty: currentQuestion.difficulty,
+          outcome: attemptCorrect ? "correct" : "incorrect",
+        });
       }
     } catch (err) {
       if (
@@ -927,6 +975,18 @@ function QuestionPage({
             executionTimeMs: elapsed,
           }),
         );
+
+        // A runtime failure is still a submission, and one of the most
+        // informative signals there is: it is where a learner gave up.
+        // Recorded as "incorrect" because the design's outcome
+        // enumeration is deliberately small, and a failed run did not
+        // produce a correct answer.
+        trackEvent({
+          name: "question_submitted",
+          engine: currentQuestion.questionType,
+          difficulty: currentQuestion.difficulty,
+          outcome: "incorrect",
+        });
       }
     }
   };
@@ -1029,6 +1089,15 @@ function QuestionPage({
               executionTimeMs: elapsed,
             }),
           );
+
+          // See the SQL failure path above: a failed PySpark run is a
+          // submission that did not produce a correct answer.
+          trackEvent({
+            name: "question_submitted",
+            engine: currentQuestion.questionType,
+            difficulty: currentQuestion.difficulty,
+            outcome: "incorrect",
+          });
         }
         return;
       }
@@ -1091,6 +1160,13 @@ function QuestionPage({
             executionTimeMs: elapsed,
           }),
         );
+
+        trackEvent({
+          name: "question_submitted",
+          engine: currentQuestion.questionType,
+          difficulty: currentQuestion.difficulty,
+          outcome: attemptCorrect ? "correct" : "incorrect",
+        });
       }
     } catch (e) {
       if (pysparkClientRef.current !== client) {
@@ -1115,6 +1191,15 @@ function QuestionPage({
             executionTimeMs: null,
           }),
         );
+
+        // A Spark engine failure is a submission that did not produce a
+        // correct answer, for the same reason as the other failure paths.
+        trackEvent({
+          name: "question_submitted",
+          engine: currentQuestion.questionType,
+          difficulty: currentQuestion.difficulty,
+          outcome: "incorrect",
+        });
       }
     }
   };

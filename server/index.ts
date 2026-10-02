@@ -19,12 +19,21 @@ import {
 import {
   isDevelopment,
   parseAdminGitHubIds,
+  parseAnalyticsRetentionDays,
   parseAuditRetentionDays,
   type Env,
 } from "./env.ts";
 import {
+  parseAnalyticsBatch,
+  recordAnalytics,
+  purgeAnalyticsOlderThan,
+  parseAnalyticsQuery,
+  readAnalytics,
+} from "./analytics.ts";
+import {
   fail,
   ok,
+  publicJson,
   redirect,
   SECURITY_HEADERS,
   type ApiError,
@@ -38,13 +47,24 @@ import {
   purgeExpiredOAuthTransactions,
 } from "./oauth.ts";
 import {
+  parsePublicFilters,
+} from "./publicFilters.ts";
+import {
   parseQuestionId,
   parseQuestionInput,
 } from "./questionSchema.ts";
 import {
+  clientAddress,
+  consume,
+  createBuckets,
+  shouldAuditDenied,
+  type RateLimitDecision,
+} from "./rateLimit.ts";
+import {
   assertCsrf,
   assertMethod,
   assertSameOrigin,
+  assertSameOriginSignal,
   readJsonObject,
   RequestError,
   requireString,
@@ -67,6 +87,7 @@ import {
   importQuestions,
   listAdminQuestions,
   listPublicQuestions,
+  PUBLIC_LIST_LIMIT,
   setQuestionFlag,
   updateQuestion,
   type AdminQuestion,
@@ -77,6 +98,126 @@ function noStore(
   extra: Record<string, string> = {},
 ): Record<string, string> {
   return { "Cache-Control": "no-store", ...extra };
+}
+
+/* -------------------------------------------------------------------------- */
+/* rate limiting                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Per-isolate rate-limit buckets.
+ *
+ * BEST EFFORT BY DESIGN. This map lives in one isolate, so the limit is
+ * per isolate rather than global; see the honesty note in
+ * server/rateLimit.ts. It costs no D1 operations, which is the point:
+ * the abuse being defended against spends D1 writes on every rejected
+ * request.
+ */
+const buckets = createBuckets();
+
+/**
+ * Anonymous budget for the `/api/admin/*` family.
+ *
+ * 60/minute per client address. The audit suggests exactly this shape.
+ * It is generous enough that an ordinary script cannot lock out a real
+ * administrator, and the legitimate administrator is exempt anyway
+ * because `enforceAdminRateLimit` runs only before the session lookup.
+ */
+const ADMIN_RATE_LIMIT = { limit: 60, windowSeconds: 60 } as const;
+
+/**
+ * How many anonymous `session_denied` audit rows are written per
+ * window.
+ *
+ * The first denial in a window is always recorded. After that, one row
+ * is written every Nth denial, so a sustained flood costs a bounded,
+ * constant number of writes instead of one per request. The action
+ * itself is preserved because it is real abuse evidence.
+ */
+const DENIED_AUDIT_SAMPLE_EVERY = 10;
+
+/**
+ * Rate-limit key for one client on one route family.
+ */
+function adminRateKey(request: Request): string {
+  return `admin:${clientAddress(request)}`;
+}
+
+/**
+ * Consume one anonymous admin budget unit.
+ *
+ * Only ever called for a caller with NO valid admin session. That is
+ * what guarantees the task's hard requirement that the single
+ * legitimate administrator can never be throttled: the exemption is
+ * decided by a real server-side session lookup, never by anything the
+ * client asserts, and the audit explicitly lists "authenticated admin
+ * reads" as NOT recommended for throttling because self-inflicted
+ * failure buys no security.
+ */
+function consumeAnonymousAdminBudget(
+  request: Request,
+): RateLimitDecision {
+  return consume(buckets, adminRateKey(request), ADMIN_RATE_LIMIT);
+}
+
+/**
+ * Build the 429 response for an exhausted anonymous budget.
+ */
+function rateLimitedResponse(
+  decision: RateLimitDecision,
+): Response {
+  return fail(
+    {
+      code: "rate_limited",
+      message: "Too many requests. Try again shortly.",
+    },
+    {
+      // Retry-After is required by RFC 9110 on a 429 and is what tells
+      // a well-behaved client when the window resets.
+      "Retry-After": String(decision.retryAfterSeconds),
+    },
+  );
+}
+
+/**
+ * Anonymous budget for the OAuth start route.
+ *
+ * 5/minute per client address, the shape the abuse audit suggests
+ * for this route (section H). A human clicks "Continue with GitHub"
+ * once per sign-in, so 5/min is generous for the legitimate flow and
+ * still caps the D1 write amplification an anonymous caller can
+ * cause through this GET.
+ */
+const OAUTH_START_RATE_LIMIT = { limit: 5, windowSeconds: 60 } as const;
+
+/**
+ * Rate-limit key for one client on the OAuth start route.
+ */
+function oauthStartRateKey(request: Request): string {
+  return `oauth-start:${clientAddress(request)}`;
+}
+
+/**
+ * Analytics ingest budget: 60 requests/minute per client address.
+ *
+ * The 5.1 design section 6.4 specifies this endpoint as an
+ * unauthenticated write, so it inherits exactly the abuse class Phase 4
+ * closed on the other anonymous write path and uses the same control. The
+ * number is deliberately far above any honest client, which batches its
+ * events (section 6.3), and far below the point at which a single caller
+ * could make a material dent in the 100,000 rows/day free-tier budget.
+ */
+const ANALYTICS_RATE_LIMIT = { limit: 60, windowSeconds: 60 } as const;
+
+/**
+ * Rate-limit key for one client on the analytics ingest route.
+ *
+ * Namespaced so analytics traffic can never consume the OAuth-start or
+ * admin budgets, and vice versa: one abusive caller on one route family
+ * must not be able to deny service to the others.
+ */
+function analyticsRateKey(request: Request): string {
+  return `analytics:${clientAddress(request)}`;
 }
 
 /**
@@ -129,6 +270,25 @@ function sessionPayload(session: AdminSession) {
   };
 }
 
+/**
+ * Raised when an anonymous caller has exhausted its request budget.
+ *
+ * A distinct type, not a `RequestError`, because it carries a
+ * `Retry-After` value that the error envelope does not model, and
+ * because it must be distinguishable from an ordinary 401 in the logs.
+ * The action performed is identical: nothing is written to the audit
+ * log on this path, which is the D1 saving this task exists to make.
+ */
+class RateLimitExceededError extends Error {
+  readonly retryAfterSeconds: number;
+
+  constructor(retryAfterSeconds: number) {
+    super("Anonymous request budget exhausted.");
+    this.name = "RateLimitExceededError";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
 function toError(error: unknown): ApiError {
   if (error instanceof RequestError) {
     return error.toApiError();
@@ -159,14 +319,52 @@ async function requireAdmin(
   );
 
   if (lookup.session === null) {
-    await recordAudit(env.DB, {
-      actorGithubId: null,
-      actorLogin: null,
-      action: "session_denied",
-      outcome: "failure",
-      metadata: { reason: lookup.reason },
-      now: nowIso(),
-    });
+    // V-02 + V-10.
+    //
+    // Order matters and is the whole point of this task:
+    //
+    //   1. the session lookup has already proved the caller is NOT an
+    //      administrator, so nothing here can throttle the legitimate
+    //      administrator;
+    //   2. the anonymous budget is charged next, and an over-budget
+    //      caller returns 429 having spent ZERO D1 writes;
+    //   3. only a caller still inside its budget reaches the audit
+    //      write, and even then it is SAMPLED, so a flood bounded by
+    //      the window still costs a bounded number of rows.
+    //
+    // The `session_denied` action is preserved because it is real
+    // abuse evidence; what is removed is the unbounded write
+    // amplification of one row per request.
+    const budget = consumeAnonymousAdminBudget(request);
+
+    if (!budget.allowed) {
+      // Thrown, not returned, so the single audit write is also skipped.
+      // The router converts this to the 429 plus Retry-After.
+      throw new RateLimitExceededError(
+        budget.retryAfterSeconds,
+      );
+    }
+
+    const key = `${adminRateKey(request)}:denied`;
+
+    if (
+      shouldAuditDenied(buckets, key, {
+        ...ADMIN_RATE_LIMIT,
+        sampleEvery: DENIED_AUDIT_SAMPLE_EVERY,
+      })
+    ) {
+      await recordAudit(env.DB, {
+        actorGithubId: null,
+        actorLogin: null,
+        action: "session_denied",
+        outcome: "failure",
+        metadata: {
+          reason: lookup.reason,
+          endpoint: new URL(request.url).pathname,
+        },
+        now: nowIso(),
+      });
+    }
 
     throw new RequestError(
       "unauthorized",
@@ -228,7 +426,33 @@ async function handleAuth(
   // --- GET /api/auth/github (start) --------------------------------------
   if (pathname === "/api/auth/github") {
     assertMethod(request, ["GET"]);
-    assertSameOrigin(request, env.APP_ORIGIN);
+
+    // V-01: this GET performs a D1 INSERT, so it must not be an
+    // unauthenticated write amplifier. Two independent guards:
+    //
+    //   1. the 4.2B rate limiter (5/min per client address, the shape the
+    //      audit recommends), charged before anything else so an
+    //      over-budget caller is refused with 429 having spent zero D1
+    //      writes;
+    //   2. `assertSameOriginSignal`, because the generic mutation-only
+    //      origin check is a no-op for GET. It trusts `Sec-Fetch-Site`
+    //      first (unforgeable, and what a browser sends for the "Continue
+    //      with GitHub" link), then an exact Origin match, then a
+    //      same-origin Referer.
+    //
+    // The limiter is charged first deliberately: it must bound the cost of
+    // the check itself, not just the write behind it.
+    const budget = consume(
+      buckets,
+      oauthStartRateKey(request),
+      OAUTH_START_RATE_LIMIT,
+    );
+
+    if (!budget.allowed) {
+      throw new RateLimitExceededError(budget.retryAfterSeconds);
+    }
+
+    assertSameOriginSignal(request, env.APP_ORIGIN);
 
     const { authorizeUrl } =
       await beginOAuthTransaction(env.DB, {
@@ -404,18 +628,26 @@ async function handlePublicQuestions(
   if (pathname === "/api/questions") {
     assertMethod(request, ["GET"]);
 
-    const questions = await listPublicQuestions(
-      env.DB,
-      {
-        engine: url.searchParams.get("engine"),
-        category: url.searchParams.get("category"),
-        difficulty: url.searchParams.get("difficulty"),
-      },
-    );
+    // V-06 / V-12: the filters are validated against the real catalog
+    // enums before they reach D1, and the query is bounded. An invalid
+    // filter is a 400 rather than a silent empty result.
+    const filters = parsePublicFilters(url);
 
-    return ok(
-      { questions, count: questions.length },
-      noStore(),
+    const page = await listPublicQuestions(env.DB, filters);
+
+    // The response is explicit about truncation: `count` is what this
+    // response actually contains, `total` is how many match overall, and
+    // `truncated` says whether the two differ. A client is never misled
+    // into believing it received the whole catalog.
+    return publicJson(
+      {
+        questions: page.questions,
+        count: page.questions.length,
+        total: page.total,
+        truncated: page.total > page.questions.length,
+        limit: PUBLIC_LIST_LIMIT,
+      },
+      request,
     );
   }
 
@@ -432,13 +664,18 @@ async function handlePublicQuestions(
       await getPublicQuestion(env.DB, id);
 
     if (question === null) {
+      // A miss stays uncached: caching a negative result would let an
+      // unpublished question be pinned as "not found" for the whole TTL
+      // even after it is published.
       return fail({
         code: "not_found",
         message: "Question not found.",
       });
     }
 
-    return ok({ question }, noStore());
+    // The second and last cacheable response. Same predicate, same
+    // reasoning.
+    return publicJson({ question }, request);
   }
 
   return fail({
@@ -448,8 +685,133 @@ async function handlePublicQuestions(
 }
 
 /* -------------------------------------------------------------------------- */
+/* analytics ingest                                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `POST /api/analytics/events` - anonymous product analytics ingest.
+ *
+ * Implements the 5.1 design section 6. The four guards are ordered by
+ * cost, cheapest and most abusable first, and the ordering is deliberate
+ * rather than incidental:
+ *
+ *   1. method
+ *   2. RATE LIMIT, charged before the body is even read. This is the same
+ *      choice made on the OAuth start route (4.2C): the limiter must bound
+ *      the cost of everything that follows it, not just of the write. A
+ *      429 here has therefore spent zero D1 operations and zero body
+ *      parsing.
+ *   3. SAME-ORIGIN SIGNAL, reusing the 4.2C control unchanged rather than
+ *      adding a second, subtly different check. `sendBeacon` is
+ *      same-origin by construction, so this costs the honest client
+ *      nothing while denying scripted cross-origin injection. The generic
+ *      `assertSameOrigin` is not used because it is a no-op for GET and
+ *      knows nothing about Fetch Metadata; `assertSameOriginSignal` trusts
+ *      `Sec-Fetch-Site` first, which is the header a script cannot forge.
+ *   4. parse, which applies the body cap, the batch cap and every
+ *      allow-list. Nothing reaches D1 until all of it has passed.
+ *
+ * NO SESSION, NO COOKIE, NO CSRF TOKEN
+ * ------------------------------------
+ * The endpoint is unauthenticated by design, so `assertCsrf` has no meaning
+ * here and is deliberately absent. CSRF protects a state change made *on
+ * behalf of* a cookie-authenticated user; there is no such user here and
+ * nothing is changed on anyone's behalf.
+ *
+ * The response is `no-store` and deliberately says nothing about what was
+ * written. A public endpoint that echoed its own counts back would let a
+ * caller verify a write landed and would be one more oracle on the write
+ * budget.
+ */
+async function handleAnalytics(
+  env: Env,
+  request: Request,
+): Promise<Response> {
+  assertMethod(request, ["POST"]);
+
+  const budget = consume(
+    buckets,
+    analyticsRateKey(request),
+    ANALYTICS_RATE_LIMIT,
+  );
+
+  if (!budget.allowed) {
+    throw new RateLimitExceededError(budget.retryAfterSeconds);
+  }
+
+  assertSameOriginSignal(request, env.APP_ORIGIN);
+
+  const body = await readJsonObject(request);
+  const parsed = parseAnalyticsBatch(body);
+
+  const statements = await recordAnalytics(
+    env.DB,
+    parsed,
+    nowIso(),
+  );
+
+  console.log(
+    `analytics ingest: ${parsed.eventsAccepted} event(s) -> ` +
+      `${parsed.deltas.length} bucket(s) in ${statements} statement(s)`,
+  );
+
+  return ok(
+    { accepted: parsed.eventsAccepted },
+    noStore(),
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /* admin questions                                                             */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * `GET /api/admin/analytics` - aggregated daily counters.
+ *
+ * Implements the 5.1 design, section 7. The design's rule for this
+ * endpoint is short and the implementation is only that rule:
+ *
+ *   - It requires a valid administrator session, exactly like every other
+ *     admin endpoint, via the same `requireAdmin` call. There is no
+ *     client-side flag, no "admin" query parameter and no public
+ *     analytics route.
+ *   - It is `no-store`. The public endpoints in 4.2D are the ONLY cacheable
+ *     API responses in this application, and this is emphatically not one
+ *     of them: the body is internal product data, and a shared cache would
+ *     hand it to anyone who could reach the edge.
+ *   - Its range is clamped server-side to at most 90 days and never more
+ *     than 400 days back. The clamp is not advisory: the accepted window
+ *     is decided here, so a caller cannot widen the scan.
+ *
+ * The response reports the range actually served, alongside the rows, so
+ * the page can tell the operator when a request was clamped rather than
+ * silently showing them a truncated window.
+ */
+async function handleAdminAnalytics(
+  env: Env,
+  request: Request,
+  url: URL,
+): Promise<Response> {
+  assertMethod(request, ["GET"]);
+
+  // A real server-side session lookup against a hashed token. Not
+  // throttled and not cached, exactly like the other admin reads.
+  await requireAdmin(env, request);
+
+  const query = parseAnalyticsQuery(url.searchParams);
+  const rows = await readAnalytics(env.DB, query);
+
+  return ok(
+    {
+      from: query.from,
+      to: query.to,
+      event: query.event,
+      rows,
+      count: rows.length,
+    },
+    noStore(),
+  );
+}
 
 async function handleAdminQuestions(
   env: Env,
@@ -904,12 +1266,24 @@ export default {
         }
 
         if (pathname.startsWith("/api/admin/")) {
+          // The whole family shares one anonymous budget, enforced
+          // inside requireAdmin once the session lookup has proved the
+          // caller is anonymous. Authenticated administrators are never
+          // charged.
           if (pathname === "/api/admin/audit") {
             return await handleAudit(
               env,
               request,
               url,
               pathname,
+            );
+          }
+
+          if (pathname === "/api/admin/analytics") {
+            return await handleAdminAnalytics(
+              env,
+              request,
+              url,
             );
           }
 
@@ -942,6 +1316,16 @@ export default {
           );
         }
 
+        // Analytics is matched before the catch-all 404 but deliberately
+        // AFTER the public question routes, and it is not part of the
+        // /api/admin family, so it can never inherit the admin budget or
+        // the admin session requirement.
+        if (
+          pathname === "/api/analytics/events"
+        ) {
+          return await handleAnalytics(env, request);
+        }
+
         return fail({
           code: "not_found",
           message: "Unknown endpoint.",
@@ -965,6 +1349,21 @@ export default {
         await env.ASSETS.fetch(request),
       );
     } catch (error) {
+      // A throttled anonymous caller gets 429 plus Retry-After and, by
+      // construction, zero audit writes.
+      if (error instanceof RateLimitExceededError) {
+        // Deliberately NOT logged. This is the hottest path under abuse,
+        // so logging every rejection would let an attacker turn the
+        // throttle into a log-flooding amplifier and spend Worker CPU
+        // doing it. The 429 itself is the signal, and the first denial
+        // of each window is still recorded in the audit log.
+        return rateLimitedResponse({
+          allowed: false,
+          retryAfterSeconds: error.retryAfterSeconds,
+          remaining: 0,
+        });
+      }
+
       const apiError = toError(error);
 
       if (apiError.code === "server_error") {
@@ -981,11 +1380,11 @@ export default {
   /**
    * Scheduled housekeeping, driven by the Worker cron trigger.
    *
-   * Runs the session and OAuth-transaction purges plus the audit-log
-   * retention delete. Each purge is isolated with Promise.allSettled so
-   * one failure cannot prevent the others; failures are logged, never
-   * thrown. This replaces the request-path housekeeping that used to
-   * run on /api/auth/session.
+   * Runs the session and OAuth-transaction purges, the audit-log
+   * retention delete and the analytics retention delete. Each purge is
+   * isolated with Promise.allSettled so one failure cannot prevent the
+   * others; failures are logged, never thrown. This replaces the
+   * request-path housekeeping that used to run on /api/auth/session.
    */
   async scheduled(
     event: ScheduledEvent,
@@ -999,10 +1398,17 @@ export default {
       env.AUDIT_RETENTION_DAYS,
     );
 
+    // Analytics keeps its own, longer window: it is a product trend
+    // record, not a security record. Sharing the audit window would
+    // discard a year of trend data for no investigative benefit.
+    const analyticsRetentionDays =
+      parseAnalyticsRetentionDays(env.ANALYTICS_RETENTION_DAYS);
+
     const results = await Promise.allSettled([
       purgeExpiredSessions(env.DB),
       purgeExpiredOAuthTransactions(env.DB),
       purgeAuditLog(env.DB, retentionDays),
+      purgeAnalyticsOlderThan(env.DB, analyticsRetentionDays),
     ]);
 
     const failed = results.filter(

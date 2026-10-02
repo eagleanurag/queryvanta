@@ -2056,6 +2056,17 @@ function AdminPage() {
           </p>
 
           {serverBacked && (
+            <div className="mt-3">
+              <Link
+                to="/admin/analytics"
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700 underline hover:text-gray-900"
+              >
+                View anonymous usage analytics
+              </Link>
+            </div>
+          )}
+
+          {serverBacked && (
             <div
               data-testid="server-sync-panel"
               className="mt-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm"

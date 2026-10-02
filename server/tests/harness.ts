@@ -15,15 +15,19 @@ import {
   spawn,
   type ChildProcess,
 } from "node:child_process";
+import { DatabaseSync } from "node:sqlite";
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync as readMigrationFile,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+
+import { applyMigrations } from "../../scripts/migrate.mjs";
 
 /**
  * A per-process port removes every cross-run interference risk: a worker left behind
@@ -281,18 +285,15 @@ export async function startWorker(): Promise<void> {
     );
   }
 
-  // Apply the schema to the fresh database. A relative path is
-  // used because wrangler resolves `--file` against the cwd.
-  runWrangler([
-    "d1",
-    "execute",
-    "queryvanta",
-    "--local",
-    "--persist-to",
-    persistPath,
-    "--file=migrations/0001_init.sql",
-    "--yes",
-  ]);
+  // Apply the schema to the fresh database. Every migration in
+  // `migrations/` is applied, in filename order, so adding one does not
+  // require editing this file and no suite can silently run against a
+  // database that is missing a table.
+  applyMigrations({
+    local: true,
+    persistTo: persistPath,
+    database: "queryvanta",
+  });
 
   // Verify the schema actually landed, so a silent migration
   // failure surfaces as a clear error rather than a confusing 500
@@ -316,6 +317,7 @@ export async function startWorker(): Promise<void> {
       "admin_sessions",
       "oauth_transactions",
       "admin_audit_log",
+      "analytics_daily",
     ]
   ) {
     if (!tables.includes(required)) {
@@ -415,7 +417,28 @@ export function mintSession(options: {
   ]);
 }
 
-export function d1Command(sql: string): string {
+/**
+ * Transient wrangler/SQLite failures that a retry genuinely fixes.
+ *
+ * The running Worker holds the same SQLite file these commands read, so
+ * under load `wrangler d1 execute` intermittently fails with an internal
+ * error or a locked database. That is tooling contention, not a property
+ * of the database or of the code under test, and it surfaces as a test
+ * failure that has nothing to do with what the test asserts.
+ *
+ * Deliberately narrow: a genuine SQL error (`SQLITE_ERROR`) or a genuine
+ * constraint violation (`SQLITE_CONSTRAINT`) does NOT match and is
+ * therefore never retried, so a real defect still fails immediately. Only
+ * the two signatures below, which no correct statement can produce, are
+ * retried, and only a few times.
+ */
+const TRANSIENT_SQLITE_ERRORS =
+  /internal error|SQLITE_BUSY|database is locked|SQLITE_LOCKED/;
+
+const D1_COMMAND_ATTEMPTS = 3;
+
+/** Run one `wrangler d1 execute`, returning raw stdout or throwing. */
+function d1CommandOnce(sql: string): string {
   return runWrangler([
     "d1",
     "execute",
@@ -427,6 +450,158 @@ export function d1Command(sql: string): string {
     sql,
     "--yes",
   ]);
+}
+
+/**
+ * Run a statement against the local D1 database.
+ *
+ * Retried only for the transient contention signatures above. A real SQL
+ * error is re-thrown on the first attempt, so a defect is never masked by
+ * the retry.
+ */
+export function d1Command(sql: string): string {
+  let lastError: unknown = null;
+
+  for (
+    let attempt = 1;
+    attempt <= D1_COMMAND_ATTEMPTS;
+    attempt += 1
+  ) {
+    try {
+      return d1CommandOnce(sql);
+    } catch (error) {
+      lastError = error;
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error);
+
+      if (
+        !TRANSIENT_SQLITE_ERRORS.test(message) ||
+        attempt === D1_COMMAND_ATTEMPTS
+      ) {
+        throw error;
+      }
+
+      // Back off a little longer each time so a busy file has room to
+      // settle rather than being retried into the same contention.
+      sleepSync(400 * attempt);
+    }
+  }
+
+  throw lastError;
+}
+
+/** Block the thread briefly; the harness is synchronous. */
+function sleepSync(ms: number): void {
+  const shared = new SharedArrayBuffer(4);
+  Atomics.wait(new Int32Array(shared), 0, 0, ms);
+}
+
+/**
+ * The slice of the D1 API the store, purge and aggregation helpers use.
+ *
+ * Declared structurally rather than as the full `D1Database` so a test can
+ * supply a synchronous `node:sqlite` connection where the production code
+ * only ever `await`s the result - which a non-Promise also satisfies.
+ */
+export type D1Handle = {
+  prepare(sql: string): {
+    bind(...params: unknown[]): {
+      run(): { meta: { changes: number } };
+      first<T>(): T | null;
+      all<T>(): { results: T[] };
+    };
+  };
+  batch(
+    statements: D1Handle["prepare"] extends (
+      sql: string,
+    ) => infer T
+      ? T[]
+      : never,
+  ): Promise<unknown[]>;
+};
+
+/**
+ * Adapt a `node:sqlite` connection to the slice of the D1 API the helpers
+ * use (`prepare`/`bind`/`run`/`first`/`all`/`batch`).
+ *
+ * This lets a test invoke a Worker export, or a store helper, directly
+ * against the same local D1 database the harness booted, without starting
+ * a second Worker. It is the reason `db.batch()` also has to be adapted:
+ * the analytics aggregation path uses it, and a faithful shim is what
+ * keeps a unit-level test of that path meaningful.
+ */
+export function toD1Handle(
+  db: DatabaseSync,
+): D1Handle {
+  return {
+    prepare(sql) {
+      const stmt = db.prepare(sql);
+
+      return {
+        bind(...params: unknown[]) {
+          const bound = params.map((param) =>
+            param === undefined ? null : param,
+          );
+
+          return {
+            run() {
+              const info = stmt.run(...(bound as never[]));
+              return { meta: { changes: Number(info.changes) } };
+            },
+            first<T>() {
+              return (stmt.get(...(bound as never[])) as T) ?? null;
+            },
+            all<T>() {
+              return { results: stmt.all(...(bound as never[])) as T[] };
+            },
+          };
+        },
+      };
+    },
+    async batch(statements) {
+      // D1 runs a batch as one transaction and returns one result per
+      // statement, in order. Mirrored here so a helper that batches
+      // behaves the same in a test as in production.
+      return statements.map((statement) =>
+        (statement as unknown as {
+          bind(...params: unknown[]): {
+            run(): { meta: { changes: number } };
+          };
+        }).bind().run(),
+      );
+    },
+  };
+}
+
+/**
+ * Open the harness's local D1 SQLite file directly.
+ *
+ * Read/write access to the exact database the running Worker is bound to,
+ * which is what lets a test seed fixtures and call store helpers directly.
+ */
+export function openLocalSqlite(): DatabaseSync {
+  const dir = join(
+    persistPath as string,
+    "v3",
+    "d1",
+    "miniflare-D1DatabaseObject",
+  );
+
+  const file = readdirSync(dir).find(
+    (entry) =>
+      entry.endsWith(".sqlite") && entry !== "metadata.sqlite",
+  );
+
+  if (file === undefined) {
+    throw new Error(
+      `D1 sqlite file not found under ${dir}`,
+    );
+  }
+
+  return new DatabaseSync(join(dir, file));
 }
 
 /**

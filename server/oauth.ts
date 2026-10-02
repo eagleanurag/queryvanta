@@ -36,6 +36,17 @@ const ALLOWED_REDIRECT_PATHS = [
 export const DEFAULT_REDIRECT_PATH = "/admin/questions";
 export const OAUTH_TXN_TTL_SECONDS = 600; // 10 minutes
 
+/**
+ * Timeout for the two outbound GitHub calls in the callback leg (V-11).
+ *
+ * Ten seconds is generous for a token exchange and a user fetch while
+ * still bounding the invocation far below the platform default, so a
+ * hung GitHub cannot hold a Worker open indefinitely. The calls are
+ * gated by a valid single-use state, so this is a robustness measure
+ * rather than an anti-abuse control.
+ */
+export const GITHUB_FETCH_TIMEOUT_MS = 10_000;
+
 export type GithubIdentity = {
   id: string;
   login: string;
@@ -298,6 +309,11 @@ export async function exchangeCodeForIdentity(options: {
         redirect_uri: callbackUrl(options.appOrigin),
         code_verifier: options.codeVerifier,
       }),
+      // V-11: without a timeout a slow or hanging GitHub holds this
+      // invocation open for the platform default, burning wall-clock for
+      // a request that has already been proven authenticated by the
+      // single-use state.
+      signal: AbortSignal.timeout(GITHUB_FETCH_TIMEOUT_MS),
     },
   );
 
@@ -330,6 +346,8 @@ export async function exchangeCodeForIdentity(options: {
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "QueryVanta-Worker",
       },
+      // V-11: same reasoning as the token exchange above.
+      signal: AbortSignal.timeout(GITHUB_FETCH_TIMEOUT_MS),
     },
   );
 

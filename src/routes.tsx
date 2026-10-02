@@ -11,6 +11,10 @@ export const AdminPage = lazy(
   () => import("./pages/AdminPage"),
 );
 
+export const AdminAnalyticsPage = lazy(
+  () => import("./pages/AdminAnalyticsPage"),
+);
+
 export const InterviewPage = lazy(
   () => import("./pages/InterviewPage"),
 );

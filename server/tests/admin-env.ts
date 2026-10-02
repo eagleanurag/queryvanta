@@ -30,6 +30,8 @@ import {
   persistPath,
 } from "./harness.ts";
 
+import { applyMigrations } from "../../scripts/migrate.mjs";
+
 const INFO_PATH = join(
   process.cwd(),
   "server",
@@ -152,16 +154,15 @@ async function up(): Promise<void> {
     throw new Error("Worker did not start");
   }
 
-  runWrangler([
-    "d1",
-    "execute",
-    "queryvanta",
-    "--local",
-    "--persist-to",
-    persistPath as string,
-    "--file=migrations/0001_init.sql",
-    "--yes",
-  ]);
+  // Every migration, discovered rather than named. Hard-coding
+  // `0001_init.sql` here meant this environment's database silently
+  // lacked `0002_analytics.sql`, so the analytics ingest endpoint
+  // returned 500 and the admin analytics e2e suite could not run at all.
+  applyMigrations({
+    local: true,
+    persistTo: persistPath as string,
+    database: "queryvanta",
+  });
 
   const now = new Date().toISOString();
 

@@ -6,7 +6,15 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // Generated output, never source.
+  //
+  // `dist` is the build artefact. `.wrangler` is the cache `wrangler dev`
+  // writes while the integration tests boot a real Worker; it contains
+  // bundled/minified middleware and transient entry stubs that cannot be
+  // parsed as project source, so linting it produced phantom "Parsing
+  // error" diagnostics that came and went depending on whether a test had
+  // just run.
+  globalIgnores(['dist', '.wrangler']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

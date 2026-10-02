@@ -117,6 +117,94 @@ export function assertSameOrigin(
 }
 
 /**
+ * Same-origin signal check for a GET route that performs a write.
+ *
+ * WHY A ROUTE-SPECIFIC CHECK EXISTS
+ * `assertSameOrigin` is a no-op for GET, because a top-level navigation
+ * sends no `Origin` header. That is exactly the right behaviour for a
+ * read, but `GET /api/auth/github` performs a D1 INSERT, so without this
+ * check any unauthenticated party could grow `oauth_transactions` by
+ * requesting a URL (audit finding V-01).
+ *
+ * WHY SEC-FETCH-SITE IS THE PRIMARY SIGNAL
+ * The legitimate flow is a top-level navigation from the admin login page
+ * (`<a href={loginUrl()}>`). A real browser sends `Sec-Fetch-Site:
+ * same-origin` for that, and `Sec-Fetch-Site` is a FORBIDDEN header name:
+ * no script, including injected script running on the attacker's own page,
+ * can set it. That makes it an unforgeable statement about who initiated
+ * the request, which `Origin` (omitted on GET navigations) and `Referer`
+ * (spoofable by a non-browser client, and stripped entirely by a strict
+ * referrer policy) are not.
+ *
+ * Signals are checked in order of trustworthiness, strongest first:
+ *
+ *   1. `Sec-Fetch-Site: same-origin`  -> accept (real same-origin navigation)
+ *      Anything else (`cross-site`, `same-site`, `none`) is a request this
+ *      app did not initiate, so it is rejected. This is the case that stops
+ *      `<img src=...>`, `fetch()`, and any other third-party trigger.
+ *   2. an exact `Origin` match         -> accept (covers clients that omit
+ *      Sec-Fetch-Site but do send Origin, and same-origin XHR).
+ *   3. a `Referer` on the app origin  -> accept (older browsers without
+ *      Fetch Metadata that still send a referrer on navigation).
+ *
+ * A request carrying none of the three is rejected. That is deliberately
+ * strict: curl, scripts and server-side callers cannot drive the D1 write,
+ * which is the entire point of the control. The rate limit on the route is
+ * a second, independent bound.
+ */
+export function assertSameOriginSignal(
+  request: Request,
+  appOrigin: string,
+): void {
+  const fetchSite = request.headers.get("Sec-Fetch-Site");
+
+  if (fetchSite !== null) {
+    // The header is present, so the browser is modern enough to have made
+    // this determination authoritatively. Trust it and do not fall
+    // through: a `cross-site` initiator must be refused even if it also
+    // managed to send a matching Origin or Referer.
+    if (fetchSite.toLowerCase() === "same-origin") {
+      return;
+    }
+
+    throw new RequestError(
+      "origin_rejected",
+      "Request was not initiated by this site.",
+    );
+  }
+
+  const origin = request.headers.get("Origin");
+
+  if (origin !== null) {
+    if (origin !== appOrigin) {
+      throw new RequestError(
+        "origin_rejected",
+        "Request origin is not allowed.",
+      );
+    }
+
+    return;
+  }
+
+  // A same-origin navigation from one of the app's own pages sends a
+  // Referer on the app origin. The trailing slash in the prefix prevents a
+  // suffix match on a look-alike host.
+  const referer = request.headers.get("Referer");
+
+  if (
+    referer !== null &&
+    referer.startsWith(`${appOrigin}/`)
+  ) {
+    return;
+  }
+
+  throw new RequestError(
+    "origin_rejected",
+    "Request is missing a verifiable same-origin signal.",
+  );
+}
+
+/**
  * Double-submit CSRF verification.
  *
  * The expected value is the CSRF token bound to the server-side

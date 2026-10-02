@@ -6,6 +6,8 @@
  * SQL text or secret material.
  */
 
+import { sha256Hex } from "./crypto.ts";
+
 export const SESSION_COOKIE = "qv_admin_session";
 
 export const SECURITY_HEADERS: Record<string, string> = {
@@ -103,6 +105,117 @@ export function fail(
     { status },
     extraHeaders,
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/* public read caching (audit finding V-05)                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Cache policy for the two public read endpoints only.
+ *
+ * WHY 60 SECONDS
+ * The audit recommends 60 and the trade-off is symmetric: a longer TTL
+ * absorbs more repeat traffic, but it is also how long an unpublished or
+ * disabled question stays visible to a cached reader. Sixty seconds keeps
+ * that window short enough for an editor to trust what they see, while
+ * still removing the great majority of anonymous repeat reads from the D1
+ * path, which is the actual cost problem.
+ *
+ * `public` is required for a shared cache to store the response at all;
+ * it is only safe here because these two responses contain nothing
+ * per-user. Every other API response keeps the `no-store` default set by
+ * `json()`.
+ */
+export const PUBLIC_CACHE_CONTROL = "public, max-age=60";
+
+/**
+ * Strong ETag derived from the exact response bytes.
+ *
+ * Hashing the serialized payload (rather than a timestamp or a row id)
+ * is what makes identical content produce an identical tag, so a client
+ * that already holds the current representation is correctly told it has
+ * the latest one. The payload is the very string `json()` will send, so
+ * the tag can never describe something other than the body.
+ */
+export async function computeEtag(
+  payload: string,
+): Promise<string> {
+  const digest = await sha256Hex(payload);
+
+  // 128 bits of the digest is far more than enough to avoid collisions
+  // here and keeps the header short.
+  return `"${digest.slice(0, 32)}"`;
+}
+
+/**
+ * Weak comparison for `If-None-Match`, as RFC 9110 §13.1.2 requires.
+ *
+ * Handles the wildcard, comma-separated lists and weak tags (`W/"..."`).
+ * A weak comparison is correct for a cache validator: it asks "is this
+ * the same representation", not "is it byte-identical".
+ */
+export function matchesIfNoneMatch(
+  header: string | null,
+  etag: string,
+): boolean {
+  if (header === null) {
+    return false;
+  }
+
+  const value = header.trim();
+
+  if (value === "") {
+    return false;
+  }
+
+  if (value === "*") {
+    return true;
+  }
+
+  const normalise = (tag: string): string =>
+    tag.trim().replace(/^W\//, "");
+
+  const target = normalise(etag);
+
+  return value
+    .split(",")
+    .some((candidate) => normalise(candidate) === target);
+}
+
+/**
+ * Serve a public read payload with a cache policy, an ETag and
+ * conditional-request handling.
+ *
+ * Deliberately the ONLY way to produce a cacheable API response, so the
+ * blast radius is explicit: adding it to a handler is a deliberate act
+ * rather than an accident. Everything else keeps `no-store`.
+ */
+export async function publicJson(
+  data: unknown,
+  request: Request,
+): Promise<Response> {
+  // Serialize exactly as `json()` will, so the ETag describes the bytes
+  // that are actually sent.
+  const payload = JSON.stringify({ ok: true, data });
+  const etag = await computeEtag(payload);
+
+  const cacheHeaders: Record<string, string> = {
+    "Cache-Control": PUBLIC_CACHE_CONTROL,
+    ETag: etag,
+  };
+
+  if (matchesIfNoneMatch(request.headers.get("If-None-Match"), etag)) {
+    // 304 carries no body by definition. The validator and the cache
+    // policy are still returned so the client refreshes its freshness
+    // lifetime.
+    return new Response(null, {
+      status: 304,
+      headers: { ...SECURITY_HEADERS, ...cacheHeaders },
+    });
+  }
+
+  return json({ ok: true, data }, {}, cacheHeaders);
 }
 
 export function redirect(

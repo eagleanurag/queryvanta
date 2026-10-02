@@ -142,10 +142,35 @@ describe("AUTHORIZATION URL (live Worker)", () => {
     await stopWorker();
   }, { timeout: 60_000 });
 
+  /**
+   * The headers a real browser sends when the admin follows the
+   * "Continue with GitHub" link.
+   *
+   * `GET /api/auth/github` performs a D1 INSERT, so the route requires a
+   * verifiable same-origin signal (audit finding V-01). The legitimate
+   * trigger is a top-level same-origin navigation, which sends
+   * `Sec-Fetch-Site: same-origin` plus a same-origin `Referer` and NO
+   * `Origin` header. These tests exercise that exact flow, and the
+   * security suite covers the rejection paths.
+   *
+   * Each test uses its own source address because the route is limited to
+   * 5 requests per minute per client address.
+   */
+  function sameOriginNavigation(address: string): RequestInit {
+    return {
+      redirect: "manual",
+      headers: {
+        "CF-Connecting-IP": address,
+        "Sec-Fetch-Site": "same-origin",
+        Referer: `${WORKER_ORIGIN}/admin/login`,
+      },
+    };
+  }
+
   it("GET /api/auth/github redirects to a compliant URL", async () => {
     const response = await fetch(
       `${WORKER_ORIGIN}/api/auth/github`,
-      { redirect: "manual" },
+      sameOriginNavigation("203.0.113.61"),
     );
 
     assert.equal(
@@ -174,7 +199,7 @@ describe("AUTHORIZATION URL (live Worker)", () => {
     // can complete the exchange.
     const response = await fetch(
       `${WORKER_ORIGIN}/api/auth/github`,
-      { redirect: "manual" },
+      sameOriginNavigation("203.0.113.62"),
     );
 
     const location = response.headers.get("location") ?? "";
@@ -222,7 +247,7 @@ describe("AUTHORIZATION URL (live Worker)", () => {
   it("state and the PKCE challenge are independent", async () => {
     const response = await fetch(
       `${WORKER_ORIGIN}/api/auth/github`,
-      { redirect: "manual" },
+      sameOriginNavigation("203.0.113.63"),
     );
 
     const first =
@@ -232,9 +257,10 @@ describe("AUTHORIZATION URL (live Worker)", () => {
 
     const second = new URL(
       (
-        await fetch(`${WORKER_ORIGIN}/api/auth/github`, {
-          redirect: "manual",
-        })
+        await fetch(
+          `${WORKER_ORIGIN}/api/auth/github`,
+          sameOriginNavigation("203.0.113.64"),
+        )
       ).headers.get("location") ?? "",
     ).searchParams;
 

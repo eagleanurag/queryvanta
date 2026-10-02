@@ -37,6 +37,13 @@
     // Retention window for admin_audit_log, in days. Not a secret.
     // A missing, zero, negative or non-numeric value falls back to
     // the documented default (90) at read time.
-    "AUDIT_RETENTION_DAYS": "90"
+    "AUDIT_RETENTION_DAYS": "90",
+    // Retention window for analytics_daily, in days. Not a secret.
+    // Deliberately LONGER than the audit window: analytics is a product
+    // trend record where an old daily bucket is worthless, while the
+    // audit log is an investigation record where it is not. Falling back
+    // to the documented default (400) keeps the table bounded without
+    // ever deleting everything or nothing.
+    "ANALYTICS_RETENTION_DAYS": "400"
   }
 }

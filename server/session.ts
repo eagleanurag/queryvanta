@@ -22,6 +22,18 @@ import { readSessionCookie } from "./request.ts";
 export const SESSION_TTL_SECONDS = 60 * 60 * 8; // 8 hours
 export const IDLE_TTL_SECONDS = 60 * 60 * 2; // 2 hours
 
+/**
+ * How stale `last_seen_at` must be before a read refreshes it (audit
+ * finding V-04).
+ *
+ * This is a WRITE-THROTTLE, not a lifetime. The idle timeout above is
+ * unchanged and still evaluated against the stored value on every read.
+ * Sixty seconds is the audit's figure and is comfortably below
+ * IDLE_TTL_SECONDS, so the lag it introduces can never approach the
+ * timeout it protects.
+ */
+export const LAST_SEEN_WRITE_THRESHOLD_SECONDS = 60;
+
 export type AdminSession = {
   id: string;
   adminGithubId: string;
@@ -219,7 +231,41 @@ export async function lookupSession(
     return { session: null, reason: "expired" };
   }
 
+  // V-04: a read used to be a write.
+  //
+  // Every authenticated read - including the admin SPA's session poll -
+  // issued an `UPDATE` to bump `last_seen_at`, so D1 row-writes scaled with
+  // admin usage rather than with anything the write was protecting.
+  //
+  // The timestamp is only refreshed once it is genuinely stale, measured
+  // against LAST_SEEN_WRITE_THRESHOLD_SECONDS (60s, the audit's figure).
+  //
+  // THE IDLE TIMEOUT IS NOT WEAKENED
+  // The idle check above runs BEFORE this, against the stored value, so a
+  // session is still revoked the moment `last_seen_at` is older than
+  // IDLE_TTL_SECONDS. The worst case this introduces is that a session
+  // which is used continuously can live up to one threshold interval
+  // longer than its nominal idle window: the timestamp lags real activity
+  // by at most 60 seconds. That is the same order as the polling interval
+  // the value was already quantised to, and it is strictly a LAG, never an
+  // extension granted to an idle session.
+  //
+  // `lastSeenAt` in the returned session reflects the value actually
+  // persisted, so a client can never observe a freshness the database
+  // does not have.
+  const staleAfterMs = LAST_SEEN_WRITE_THRESHOLD_SECONDS * 1000;
+  const lastSeenAge = now - Date.parse(row.last_seen_at);
+  const isStale = !Number.isFinite(lastSeenAge) || lastSeenAge >= staleAfterMs;
+
+  if (!isStale) {
+    return {
+      session: toSession(row),
+      reason: "ok",
+    };
+  }
+
   const lastSeen = nowIso();
+
   await db
     .prepare(
       `UPDATE admin_sessions

@@ -439,3 +439,59 @@ enumerated) · `server/tests/harness.ts` · `docs/security/admin-auth.md` ·
 
 Not changed by this audit: every file above, plus all configuration, schema,
 secrets and deployed state. The only file created is this report.
+
+---
+
+## Phase 4 outcome (recorded by task 4.2H)
+
+Full re-measurement against the implemented code, with evidence, is in
+[phase-4-verification.md](./phase-4-verification.md). Summary:
+
+| Finding | Outcome |
+|---|---|
+| V-01 unauthenticated OAuth-start INSERT | **CLOSED** - Sec-Fetch-Site-first same-origin check + 5/min limit |
+| V-02 audit write per anonymous admin request | **CLOSED** - 60/min anonymous budget, 429 writes nothing, denials sampled |
+| V-03 housekeeping on the request path | **CLOSED** - moved to scheduled() |
+| V-04 authenticated reads perform a write | **CLOSED** - last_seen_at refreshed only past 60s; idle timeout unchanged |
+| V-05 public reads uncacheable | **CLOSED** - public, max-age=60 + content-derived ETag + 304 |
+| V-06 unbounded public SELECT * | **CLOSED** - limit 100, 	otal reported separately, 	runcated flag |
+| V-07 client amplification per mutation | **CLOSED** - ~3 catalog GETs per mutation -> 1 |
+| V-08 sequential import loop | **CLOSED** - 1500 round trips -> 253 statements / 3 batches |
+| V-09 audit log has no retention | **CLOSED** - bound-cutoff delete, AUDIT_RETENTION_DAYS config, 90-day default |
+| V-10 no rate limiting | **CLOSED for audited vectors**, still best-effort per-isolate |
+| V-11 outbound GitHub fetches untimed | **CLOSED** - AbortSignal.timeout(10_000) on both calls |
+| V-12 unvalidated public filters | **CLOSED**, category bounded by length/charset rather than allow-listed (see report) |
+| V-13 no cron handler | **CLOSED** |
+| V-14 large static payload | **ACCEPTED** - re-measured 32.5 MB; audit recommended no change |
+| V-15 dead `revokeAllSessionsForUser` | **CLOSED** - absent from the current tree |
+| V-16 existing protections | **VERIFIED INTACT** |
+
+Five deliberate deviations from the audit's suggested remediations are
+recorded in section F of the verification report, each with its reasoning.
+Phase 5 is recommended as safe to start, subject to three stated conditions.
+---
+
+## Phase 5 outcome (recorded by task 5.4)
+
+Phase 5 adds anonymous product analytics. Its privacy and security review is
+in [`analytics-privacy-review.md`](./analytics-privacy-review.md), with the
+design of record in [`analytics-architecture.md`](./analytics-architecture.md).
+
+| Phase 5 area | Outcome |
+|---|---|
+| Storage shape | Six columns, no identifier column. Verified against live sqlite_master, not from the migration file |
+| Personal data stored | **None.** Every stored value is a date, an allow-listed name, or a count |
+| Fingerprinting | **None**, and not possible: nothing stable about a client is read and nothing is hashed |
+| Cross-session linkage | **None.** Three distinct client addresses produced one shared, unattributable counter |
+| Identifier / backdate injection | Refused with 400; an unrecognised event field is an error, never passed through |
+| Admin read authorization | `requireAdmin`, same call as every other admin route; 401/403/405/405 all asserted |
+| Admin read cache policy | `no-store`, no public, no ETag; the 4.2D invariant that only /api/questions is publicly cacheable is re-asserted |
+| Ingest abuse resistance | 60/min per address, charged before the body is read; cross-site with a forged referrer is 403 |
+| Free-tier cost | 6 rows for 28 measured events; 144 rows/day traffic-independent ceiling; ~0.43% of the daily write budget |
+| Residual risk | Rate limiting is per-isolate and therefore best-effort, as already documented. Not overclaimed |
+
+One low-severity finding was recorded rather than fixed, per the task
+instruction not to change behaviour to make a finding disappear: the client
+collector posts to a path that does not exist on the GitHub Pages deployment,
+so each flush 404s. It collects nothing and has no user-visible effect.
+Recommended as a new roadmap task.

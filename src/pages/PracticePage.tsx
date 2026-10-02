@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -14,6 +15,8 @@ import {
   RotateCcw,
   Target,
 } from "lucide-react";
+
+import { trackEvent } from "../lib/analytics";
 
 import {
   Link,
@@ -111,6 +114,82 @@ function PracticePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [adminVersion],
   );
+
+  // Anonymous product analytics (task 5.2).
+  //
+  // Both effects depend on the whole `session` object, which is
+  // re-read from storage on every sync event and is therefore replaced
+  // constantly. The refs are what make that safe: each is keyed by
+  // session id, so "sessions started" and "sessions finished" are each
+  // reported once per session no matter how many times the page
+  // re-renders, rather than once per render.
+  const reportedStartRef = useRef<string | null>(
+    null,
+  );
+  const reportedFinishRef = useRef<string | null>(
+    null,
+  );
+
+  /**
+   * Engine a session is reported under.
+   *
+   * The design's `engine` property is a single value, so a mixed session
+   * cannot be described exactly. The first question's engine is used: it
+   * is always one of the server's allow-listed values, and it is a stable
+   * property of the session rather than of where the learner navigated.
+   */
+  const sessionEngine =
+    session === null
+      ? null
+      : (allQuestions.find(
+          (question) =>
+            question.id === session.questionIds[0],
+        )?.questionType ?? null);
+
+  useEffect(() => {
+    if (
+      session === null ||
+      session.status !== "active" ||
+      sessionEngine === null ||
+      reportedStartRef.current === session.sessionId
+    ) {
+      return;
+    }
+
+    reportedStartRef.current = session.sessionId;
+
+    trackEvent({
+      name: "practice_started",
+      engine: sessionEngine,
+    });
+  }, [session, sessionEngine]);
+
+  useEffect(() => {
+    if (
+      session === null ||
+      session.status !== "finished" ||
+      sessionEngine === null ||
+      reportedFinishRef.current === session.sessionId
+    ) {
+      return;
+    }
+
+    reportedFinishRef.current = session.sessionId;
+
+    // A session finished with every question completed is a completed
+    // session; anything else was abandoned part-way, which is the signal
+    // this event exists to capture.
+    const completedAll =
+      session.completedQuestionIds.length >=
+      session.questionIds.length;
+
+    trackEvent({
+      name: "practice_completed",
+      engine: sessionEngine,
+      outcome: completedAll ? "correct" : "abandoned",
+    });
+  }, [session, sessionEngine]);
+
 
   const questionById = useMemo(() => {
     const lookup = new Map(

@@ -230,10 +230,25 @@ Find your numeric GitHub id at `https://api.github.com/users/<your-login>`.
 
 ```sh
 npm run build:worker
-npx wrangler d1 execute queryvanta --remote --file=migrations/0001_init.sql
+npm run d1:migrate
 npm run verify:worker
 npx wrangler deploy --config ./wrangler.jsonc
 ```
+
+`npm run d1:migrate` applies **every** file in `migrations/`, in filename
+order, via `scripts/migrate.mjs`. Do not replace it with a
+`wrangler d1 execute --file=migrations/<one-file>.sql` invocation: naming a
+single file silently skips the others, and the endpoint that needs the newer
+table then fails in production. Every statement in every migration is
+idempotent (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`), so
+running the whole set on every deploy is safe and is the intended procedure.
+
+One migration-file constraint is worth knowing before editing any `.sql` in
+`migrations/`: `wrangler d1 execute --file` splits a file into statements
+with a scanner that does not track `--` comments while looking for string
+literals, so a **single-quote character inside a comment** corrupts statement
+splitting. A semicolon inside a comment is fine. `server/tests/analytics.test.ts`
+asserts this for every migration file.
 
 `npm run verify:worker` is a hard gate. It inspects the real `dist/`
 and refuses to let a GitHub Pages build reach the Worker — the

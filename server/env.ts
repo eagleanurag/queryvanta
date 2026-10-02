@@ -67,6 +67,19 @@ export type Env = {
    * back to DEFAULT_AUDIT_RETENTION_DAYS at read time.
    */
   AUDIT_RETENTION_DAYS: string;
+
+  /**
+   * Retention window for `analytics_daily`, in days. Not a secret: it is a
+   * storage bound read from `wrangler.jsonc` `vars`, never a credential. A
+   * missing, zero, negative or non-numeric value falls back to
+   * DEFAULT_ANALYTICS_RETENTION_DAYS at read time.
+   *
+   * Deliberately a different, longer window from AUDIT_RETENTION_DAYS:
+   * analytics is a product trend record where an old daily bucket is
+   * worthless, while the audit log is an investigation record where it is
+   * not. The two must not share a window.
+   */
+  ANALYTICS_RETENTION_DAYS: string;
 };
 
 /**
@@ -94,6 +107,39 @@ export function parseAuditRetentionDays(
 
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return DEFAULT_AUDIT_RETENTION_DAYS;
+  }
+
+  return parsed;
+}
+
+/**
+ * Safe fallback retention window for `analytics_daily`, in days.
+ *
+ * A year of daily buckets, which keeps a year of trend data while bounding
+ * the table at a few MB. Used when ANALYTICS_RETENTION_DAYS is missing,
+ * zero, negative or non-numeric.
+ */
+export const DEFAULT_ANALYTICS_RETENTION_DAYS = 400;
+
+/**
+ * Parse the analytics retention window in days.
+ *
+ * Mirrors `parseAuditRetentionDays` exactly, including the fail-safe
+ * behaviour: a bad configuration falls back to the default rather than
+ * deleting everything or nothing. Kept next to the audit parser so both
+ * retention policies are visible together.
+ */
+export function parseAnalyticsRetentionDays(
+  raw: string | undefined,
+): number {
+  if (typeof raw !== "string" || raw.trim() === "") {
+    return DEFAULT_ANALYTICS_RETENTION_DAYS;
+  }
+
+  const parsed = Number(raw);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_ANALYTICS_RETENTION_DAYS;
   }
 
   return parsed;

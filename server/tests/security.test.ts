@@ -3,6 +3,7 @@ import { after, before, describe, it } from "node:test";
 
 import {
   APP_ORIGIN,
+  d1Command,
   mintSession,
   startWorker,
   stopWorker,
@@ -106,6 +107,26 @@ function cookieHeader(token: string): string {
   return `qv_admin_session=${token}`;
 }
 
+/**
+ * One source address per OAuth-start test.
+ *
+ * The route is rate limited to 5 requests per minute per client address,
+ * so tests sharing the default loopback address would consume each
+ * other's budget and fail depending on execution order. Giving each test
+ * its own address keeps them independent and makes a genuine 429 the only
+ * reason a test sees a 429.
+ */
+const OAUTH_START_ADDRESSES = {
+  origin: "203.0.113.21",
+  bare: "203.0.113.22",
+  evilOrigin: "203.0.113.23",
+  crossSite: "203.0.113.24",
+  sameSite: "203.0.113.25",
+  fetchSite: "203.0.113.26",
+  refererOnly: "203.0.113.27",
+  replay: "203.0.113.28",
+};
+
 function auth(
   token: string,
   csrf: string,
@@ -117,6 +138,19 @@ function auth(
     "X-CSRF-Token": csrf,
     ...extra,
   };
+}
+
+/** Count rows in the OAuth transaction table. */
+function oauthTransactionCount(): number {
+  const out = d1Command(
+    "SELECT COUNT(*) AS n FROM oauth_transactions;",
+  );
+
+  const match = /"n"\s*:\s*(\d+)/.exec(out);
+
+  assert.ok(match, `could not read transaction count from: ${out}`);
+
+  return Number(match[1]);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -334,8 +368,19 @@ describe("OAUTH", () => {
   });
 
   it("starts the OAuth flow with PKCE and a state parameter", async () => {
+    // A legitimate start carries a verifiable same-origin signal.
+    // Here an exact Origin match; the Referer-only and Sec-Fetch-Site
+    // navigation cases are covered separately below.
+    //
+    // Each start test uses its own source address so it owns its own
+    // 5/min budget and cannot be made to fail by an unrelated test
+    // consuming the shared default address's budget.
     const result = await api("/api/auth/github", {
       redirect: "manual",
+      headers: {
+        "CF-Connecting-IP": OAUTH_START_ADDRESSES.origin,
+        Origin: APP_ORIGIN,
+      },
     });
 
     assert.equal(result.status, 302);
@@ -351,9 +396,194 @@ describe("OAUTH", () => {
     assert.doesNotMatch(location, /repo|write:|admin:/);
   });
 
+  it("rejects a start with no same-origin signal and inserts nothing", async () => {
+    const before = oauthTransactionCount();
+
+    // No Sec-Fetch-Site, no Origin and no Referer: a script or a bare
+    // client cannot prove the request came from the app.
+    const result = await api("/api/auth/github", {
+      redirect: "manual",
+      headers: {
+        "CF-Connecting-IP": OAUTH_START_ADDRESSES.bare,
+      },
+    });
+
+    assert.equal(result.status, 403);
+    assert.equal(result.body.error?.code, "origin_rejected");
+    assert.equal(
+      oauthTransactionCount(),
+      before,
+      "a rejected start must not insert a transaction row",
+    );
+  });
+
+  it("rejects a cross-origin start", async () => {
+    const before = oauthTransactionCount();
+
+    const result = await api("/api/auth/github", {
+      redirect: "manual",
+      headers: {
+        "CF-Connecting-IP": OAUTH_START_ADDRESSES.evilOrigin,
+        Origin: "https://evil.example",
+      },
+    });
+
+    assert.equal(result.status, 403);
+    assert.equal(result.body.error?.code, "origin_rejected");
+    assert.equal(
+      oauthTransactionCount(),
+      before,
+      "a cross-origin start must not insert a transaction row",
+    );
+  });
+
+  it("rejects a cross-site start even when it forges a same-origin Referer", async () => {
+    // This is the actual abuse shape behind audit finding V-01: a page on
+    // another origin triggers the write with <img src=...> or fetch().
+    // The browser sets Sec-Fetch-Site: cross-site, and that header cannot
+    // be overridden by script. It must win over a spoofed Referer.
+    const before = oauthTransactionCount();
+
+    const result = await api("/api/auth/github", {
+      redirect: "manual",
+      headers: {
+        "CF-Connecting-IP": OAUTH_START_ADDRESSES.crossSite,
+        "Sec-Fetch-Site": "cross-site",
+        Referer: `${APP_ORIGIN}/admin/login`,
+      },
+    });
+
+    assert.equal(result.status, 403);
+    assert.equal(result.body.error?.code, "origin_rejected");
+    assert.equal(
+      oauthTransactionCount(),
+      before,
+      "a cross-site start must not insert a transaction row",
+    );
+  });
+
+  it("rejects a same-site start from a look-alike host", async () => {
+    // same-site is not same-origin: a sibling subdomain must not be able
+    // to drive this deployment's D1 write.
+    const before = oauthTransactionCount();
+
+    const result = await api("/api/auth/github", {
+      redirect: "manual",
+      headers: {
+        "CF-Connecting-IP": OAUTH_START_ADDRESSES.sameSite,
+        "Sec-Fetch-Site": "same-site",
+      },
+    });
+
+    assert.equal(result.status, 403);
+    assert.equal(result.body.error?.code, "origin_rejected");
+    assert.equal(
+      oauthTransactionCount(),
+      before,
+      "a same-site start must not insert a transaction row",
+    );
+  });
+
+  it("accepts the real browser navigation signal and inserts exactly one row", async () => {
+    // The legitimate flow is a top-level same-origin navigation from the
+    // admin login page. A real browser sends Sec-Fetch-Site: same-origin
+    // for that and no Origin header at all, so this is the case that
+    // matters most and must not regress.
+    const before = oauthTransactionCount();
+
+    const result = await api("/api/auth/github", {
+      redirect: "manual",
+      headers: {
+        "CF-Connecting-IP": OAUTH_START_ADDRESSES.fetchSite,
+        "Sec-Fetch-Site": "same-origin",
+        Referer: `${APP_ORIGIN}/admin/login`,
+      },
+    });
+
+    assert.equal(result.status, 302);
+    assert.match(
+      result.headers.get("location") ?? "",
+      /github\.com\/login\/oauth\/authorize/,
+    );
+    assert.equal(
+      oauthTransactionCount(),
+      before + 1,
+      "a legitimate start must create exactly one transaction",
+    );
+  });
+
+  it("accepts a same-origin navigation that sends only a Referer", async () => {
+    // A plain link click from the app's own login page in a browser
+    // without Fetch Metadata sends a same-origin Referer and no Origin
+    // header. This fallback must keep working.
+    const before = oauthTransactionCount();
+
+    const result = await api("/api/auth/github", {
+      redirect: "manual",
+      headers: {
+        "CF-Connecting-IP": OAUTH_START_ADDRESSES.refererOnly,
+        Referer: `${APP_ORIGIN}/admin/login`,
+      },
+    });
+
+    assert.equal(result.status, 302);
+    assert.match(
+      result.headers.get("location") ?? "",
+      /github\.com\/login\/oauth\/authorize/,
+    );
+    assert.equal(
+      oauthTransactionCount(),
+      before + 1,
+      "a legitimate start must create exactly one transaction",
+    );
+  });
+
+  it("rate limits the OAuth start route", async () => {
+    // A distinct source address so this burst gets its own budget.
+    const address = "203.0.113.90";
+
+    const send = () =>
+      api("/api/auth/github", {
+        redirect: "manual",
+        headers: {
+          "CF-Connecting-IP": address,
+          Origin: APP_ORIGIN,
+        },
+      });
+
+    // The first 5 requests in a window are allowed.
+    for (let index = 0; index < 5; index++) {
+      const result = await send();
+
+      assert.equal(
+        result.status,
+        302,
+        `request ${index + 1} inside the budget must be allowed`,
+      );
+    }
+
+    // The 6th is throttled.
+    const limited = await send();
+
+    assert.equal(limited.status, 429);
+    assert.equal(limited.body.error?.code, "rate_limited");
+
+    const retryAfter = limited.headers.get("retry-after");
+
+    assert.ok(retryAfter, "429 must carry a Retry-After header");
+    assert.ok(
+      Number(retryAfter) >= 1,
+      "Retry-After must be at least 1 second",
+    );
+  });
+
   it("rejects a replayed OAuth callback", async () => {
     const first = await api("/api/auth/github", {
       redirect: "manual",
+      headers: {
+        "CF-Connecting-IP": OAUTH_START_ADDRESSES.replay,
+        Origin: APP_ORIGIN,
+      },
     });
     const location = first.headers.get("location") ?? "";
     const state = new URL(location).searchParams.get("state");

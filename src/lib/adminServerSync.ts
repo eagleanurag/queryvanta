@@ -158,7 +158,18 @@ function mergeLearnerState(
  * public catalog.
  */
 export async function fetchServerCatalog(): Promise<
-  ApiResult<{ questions: ServerCatalogEntry[]; count: number }>
+  ApiResult<{
+    questions: ServerCatalogEntry[];
+    count: number;
+    /**
+     * The untouched server rows this payload was built from.
+     *
+     * Retained so a caller that also needs the public mirror can derive it
+     * WITHOUT issuing a second identical request (audit finding V-07). It is
+     * the same data, not a copy from anywhere else.
+     */
+    rows: AdminQuestionPayload[];
+  }>
 > {
   const result = await listAdminQuestions();
 
@@ -166,6 +177,7 @@ export async function fetchServerCatalog(): Promise<
     return result as ApiResult<{
       questions: ServerCatalogEntry[];
       count: number;
+      rows: AdminQuestionPayload[];
     }>;
   }
 
@@ -184,7 +196,11 @@ export async function fetchServerCatalog(): Promise<
 
   return {
     ok: true,
-    data: { questions, count: questions.length },
+    data: {
+      questions,
+      count: questions.length,
+      rows: result.data.questions,
+    },
   };
 }
 
@@ -220,17 +236,25 @@ export async function loadAdminCatalog(): Promise<
     }>;
   }
 
-  // Refresh the public mirror from the same payload. A mirror
-  // failure must not discard the admin list, which is already
-  // authoritative.
-  const mirror = await syncFromServer();
+  // The raw payload is retained by `fetchServerCatalog` for exactly this
+  // reason: the mirror is derived from the same rows the admin list was
+  // built from, so the catalog is fetched once and reused, not twice.
+  const catalogRows = catalog.data.rows;
+
+  // Refresh the public mirror from the payload ALREADY fetched above.
+  //
+  // V-07: this used to call `syncFromServer()`, which fetched the identical
+  // endpoint again. The admin list and the public mirror are two views of one
+  // payload, so the second request was pure duplication: one mutation cost
+  // two full-catalog GETs before the caller's own refresh, three in total.
+  applyPublicMirror(catalogRows);
 
   return {
     ok: true,
     data: {
       questions: catalog.data.questions,
       count: catalog.data.count,
-      publicCount: mirror.ok ? mirror.data.count : -1,
+      publicCount: publicMirrorCount(catalogRows),
     },
   };
 }
@@ -250,18 +274,45 @@ export async function syncFromServer(): Promise<
     return result as ApiResult<{ count: number }>;
   }
 
-  const publicRows = result.data.questions.filter(
+  applyPublicMirror(result.data.questions);
+
+  return {
+    ok: true,
+    data: { count: publicMirrorCount(result.data.questions) },
+  };
+}
+
+/**
+ * Number of rows in the public mirror for an already-fetched payload.
+ */
+function publicMirrorCount(
+  rows: AdminQuestionPayload[],
+): number {
+  return rows.filter(
+    (row) => row.enabled !== false && row.published === true,
+  ).length;
+}
+
+/**
+ * Write the public mirror from an ALREADY-FETCHED catalog payload.
+ *
+ * This is the de-duplication that closes audit finding V-07. `loadAdminCatalog`
+ * used to fetch the full catalog and then call `syncFromServer`, which
+ * fetched the SAME endpoint a second time. Splitting the payload handling out
+ * of the fetching lets one response serve both channels: one request instead
+ * of two, with identical output.
+ *
+ * Only published AND enabled rows are mirrored, so a draft or disabled server
+ * question never enters the public catalog in the browser.
+ */
+function applyPublicMirror(rows: AdminQuestionPayload[]): void {
+  const publicRows = rows.filter(
     (row) => row.enabled !== false && row.published === true,
   );
 
   writeLocal(mergeLearnerState(publicRows.map(toClientQuestion)));
 
   window.dispatchEvent(new Event(SERVER_SYNC_EVENT));
-
-  return {
-    ok: true,
-    data: { count: publicRows.length },
-  };
 }
 
 export async function serverCreate(
@@ -274,8 +325,6 @@ export async function serverCreate(
   if (!result.ok) {
     return result as ApiResult<Question>;
   }
-
-  await syncFromServer();
 
   return {
     ok: true,
@@ -296,8 +345,6 @@ export async function serverUpdate(
     return result as ApiResult<Question>;
   }
 
-  await syncFromServer();
-
   return {
     ok: true,
     data: toClientQuestion(result.data.question),
@@ -312,8 +359,6 @@ export async function serverDelete(
   if (!result.ok) {
     return result as ApiResult<null>;
   }
-
-  await syncFromServer();
 
   return { ok: true, data: null };
 }
@@ -331,8 +376,6 @@ export async function serverToggleEnabled(
     return result as ApiResult<null>;
   }
 
-  await syncFromServer();
-
   return { ok: true, data: null };
 }
 
@@ -349,8 +392,6 @@ export async function serverPublish(
     return result as ApiResult<null>;
   }
 
-  await syncFromServer();
-
   return { ok: true, data: null };
 }
 
@@ -366,8 +407,6 @@ export async function serverDuplicate(
   if (!result.ok) {
     return result as ApiResult<Question>;
   }
-
-  await syncFromServer();
 
   return {
     ok: true,
@@ -392,15 +431,12 @@ export async function serverImport(
     failures: { id: string; reason: string }[];
   }>
 > {
-  const result = await importServerQuestions(
+  // V-07: no catalog re-fetch here either. An import returns the precise
+  // per-item outcome, and the caller refreshes the catalog from the single
+  // response `loadAdminCatalog` already fetches.
+  return importServerQuestions(
     questions as AdminQuestionPayload[],
   );
-
-  if (result.ok) {
-    await syncFromServer();
-  }
-
-  return result;
 }
 
 /** Count of browser-local admin questions awaiting migration. */
